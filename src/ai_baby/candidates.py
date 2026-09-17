@@ -89,6 +89,12 @@ _ENGLISH_FACT_QUALIFIER = re.compile(
     r"uncertain)\b",
     re.IGNORECASE,
 )
+_ENGLISH_FACT_START = re.compile(
+    r"^(?:i\s+live\s+in\b|my\s+birthday\s+is\b|i\s+work\s+as\b|"
+    r"my\s+(?:job|profession)\s+is\b|"
+    r"[^.;?!]+?\s+is\s+my\s+(?:friend|classmate|teacher|coworker|colleague|family\s+member)\b)",
+    re.IGNORECASE,
+)
 
 
 def _english_preference(sentence: str) -> MemoryCandidate | None:
@@ -151,6 +157,35 @@ def _unsupported_still(sentence: str) -> bool:
     return remainder == sentence or "还是" in remainder
 
 
+def _split_supported_english_periods(segment: str) -> list[str]:
+    """Split periods only between independently supported English profile/relation facts.
+
+    A blind ``. `` split would corrupt values such as ``Dr. Smith`` or ``St. Louis``
+    and could detach a qualifier from an otherwise safe-looking first clause. Split
+    only when the left side is already a complete supported fact and the right side
+    starts like another supported fact. Preference sentences deliberately keep the
+    older single-clause safety rule. Unsupported tails also stay attached so existing
+    conservative qualifier checks can reject the whole fragment.
+    """
+    pending = segment.strip()
+    clauses: list[str] = []
+    while pending:
+        boundary = None
+        for match in re.finditer(r"\.\s+", pending):
+            left = pending[: match.start()].strip()
+            right = pending[match.end() :].strip()
+            left_supported = _english_simple_fact(left)
+            if left_supported is not None and right and _ENGLISH_FACT_START.match(right):
+                boundary = (left, right)
+                break
+        if boundary is None:
+            clauses.append(pending)
+            break
+        left, pending = boundary
+        clauses.append(left)
+    return clauses
+
+
 def assertion_clauses(text: str) -> list[str]:
     """Split explicit clauses without stripping the scope of questions or hypotheticals.
 
@@ -158,54 +193,58 @@ def assertion_clauses(text: str) -> list[str]:
     Unknown temporal qualifiers are rejected instead of becoming part of a fact value.
     """
     clauses = []
-    for sentence in re.split(r"[。！!;；\n]+", text):
-        sentence = sentence.strip().rstrip(".")
-        event = re.match(r"(?:重要事件|今天发生了)[：:]", sentence)
-        questions = (
-            tuple(q for q in _QUESTIONS if q not in {"什么", "哪里", "哪儿", "谁"})
-            if event
-            else _QUESTIONS
-        )
-        if (
-            not sentence
-            or _unsupported_still(sentence)
-            or any(cue in sentence for cue in (*questions, *_NON_ASSERTIONS))
-        ):
-            continue
-        if sentence.startswith("我喜欢的") or "住院" in sentence:
-            continue
-        if _REVERSAL.fullmatch(sentence):
-            clauses.append(sentence)
-            continue
-        if re.match(r"(?:记住|学习|知识|重要事件|今天发生了|关系)[：:]", sentence):
-            clauses.append(sentence)
-            continue
-        if _ENGLISH_PREFERENCE_CUE.search(sentence):
-            # Do not discard a qualifier/report/tag question when splitting commas.
-            # Every part must be a complete supported assertion; otherwise abstain.
-            if not all(_english_preference(part.strip()) for part in re.split(r"[，,]+", sentence)):
-                continue
-        if _ENGLISH_FACT_CUE.search(sentence):
-            # English fact assertions are deliberately one-clause only. In particular,
-            # never split "I live in Paris, if ..." and persist the first fragment.
-            if re.search(r"[，,]", sentence) or _english_simple_fact(sentence) is None:
-                continue
-        for clause in re.split(r"[，,]+", sentence):
-            clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
-            continued = sentence.startswith("我") and (
-                clause.startswith(("现在", "已经", "不再"))
-                or re.match(
-                    r"(?:也|还|又|还是)?(?:特别|很|超|好|挺)?(?:不)?(?:喜欢|讨厌)",
-                    clause,
-                )
+    coarse_sentences = re.split(r"[。！!;；\n]+", text)
+    for coarse_sentence in coarse_sentences:
+        for sentence in _split_supported_english_periods(coarse_sentence):
+            sentence = sentence.strip().rstrip(".")
+            event = re.match(r"(?:重要事件|今天发生了)[：:]", sentence)
+            questions = (
+                tuple(q for q in _QUESTIONS if q not in {"什么", "哪里", "哪儿", "谁"})
+                if event
+                else _QUESTIONS
             )
-            if continued and not clause.startswith("我"):
-                clause = "我" + clause
-            if any(cue in clause for cue in ("但是", "但", "不过", "虽然", "因为", "然后")):
+            if (
+                not sentence
+                or _unsupported_still(sentence)
+                or any(cue in sentence for cue in (*questions, *_NON_ASSERTIONS))
+            ):
                 continue
-            if re.search(r"(?:喜欢|讨厌).+(?:喜欢|讨厌)", clause):
+            if sentence.startswith("我喜欢的") or "住院" in sentence:
                 continue
-            clauses.append(clause)
+            if _REVERSAL.fullmatch(sentence):
+                clauses.append(sentence)
+                continue
+            if re.match(r"(?:记住|学习|知识|重要事件|今天发生了|关系)[：:]", sentence):
+                clauses.append(sentence)
+                continue
+            if _ENGLISH_PREFERENCE_CUE.search(sentence):
+                # Do not discard a qualifier/report/tag question when splitting commas.
+                # Every part must be a complete supported assertion; otherwise abstain.
+                if not all(
+                    _english_preference(part.strip()) for part in re.split(r"[，,]+", sentence)
+                ):
+                    continue
+            if _ENGLISH_FACT_CUE.search(sentence):
+                # English fact assertions are deliberately one-clause only. In particular,
+                # never split "I live in Paris, if ..." and persist the first fragment.
+                if re.search(r"[，,]", sentence) or _english_simple_fact(sentence) is None:
+                    continue
+            for clause in re.split(r"[，,]+", sentence):
+                clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
+                continued = sentence.startswith("我") and (
+                    clause.startswith(("现在", "已经", "不再"))
+                    or re.match(
+                        r"(?:也|还|又|还是)?(?:特别|很|超|好|挺)?(?:不)?(?:喜欢|讨厌)",
+                        clause,
+                    )
+                )
+                if continued and not clause.startswith("我"):
+                    clause = "我" + clause
+                if any(cue in clause for cue in ("但是", "但", "不过", "虽然", "因为", "然后")):
+                    continue
+                if re.search(r"(?:喜欢|讨厌).+(?:喜欢|讨厌)", clause):
+                    continue
+                clauses.append(clause)
     return clauses
 
 
