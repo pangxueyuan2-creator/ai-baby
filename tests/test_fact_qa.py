@@ -75,6 +75,29 @@ def test_memory_question_beats_gentle_tone_template(baby):
     assert "慢慢学" not in reply
 
 
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ("我住在浙江。我住在哪里？", "你告诉过我，你住在浙江"),
+        ("我的朋友叫小明。我的朋友是谁？", "我记得你的朋友有：小明"),
+        ("我喜欢草莓。我喜欢什么？", "你喜欢草莓"),
+    ],
+)
+def test_same_turn_teaching_does_not_swallow_memory_question(baby, message, expected):
+    reply = baby.chat(message).text
+
+    assert expected in reply
+    assert "先记住啦" not in reply
+
+
+def test_same_turn_unrelated_learning_does_not_swallow_missing_fact_answer(baby):
+    reply = baby.chat("我喜欢草莓。我做什么工作？").text
+
+    assert "还没有告诉我你的职业" in reply
+    assert "先记住啦" not in reply
+    assert "草莓" in baby.chat("我喜欢什么？").text
+
+
 def test_mock_does_not_present_arbitrary_retrieval_as_related_answer(baby):
     baby.chat("我的朋友叫小明。")
 

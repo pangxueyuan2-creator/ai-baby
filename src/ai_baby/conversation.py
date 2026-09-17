@@ -41,8 +41,8 @@ def is_experience_query(text: str) -> bool:
     compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text)
     asked = any(word in compact for word in ("什么", "吗", "呢", "记得", "看了", "做了", "发生"))
     recent = any(word in compact for word in ("昨晚", "昨天", "今晚", "今天晚上"))
-    return (
-        recent and asked or any(word in compact for word in ("看了什么", "做了什么", "发生了什么"))
+    return (recent and asked) or any(
+        word in compact for word in ("看了什么", "做了什么", "发生了什么")
     )
 
 
@@ -53,7 +53,6 @@ def recall_topics(text: str) -> set[str]:
         " ",
         text,
     )
-    # Single Chinese characters are deliberately insufficient for shared-event assertions.
     return {token for token in tokens(text) if len(token) >= 2}
 
 
@@ -84,57 +83,21 @@ _FACT_QUERY_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
         "我的职业是什么",
         "我的职业是啥",
     ),
-    ("relation", "朋友"): (
-        "我的朋友是谁",
-        "我有哪些朋友",
-        "我的朋友有谁",
-        "谁是我的朋友",
-    ),
-    ("relation", "同学"): (
-        "我的同学是谁",
-        "我有哪些同学",
-        "我的同学有谁",
-        "谁是我的同学",
-    ),
-    ("relation", "老师"): (
-        "我的老师是谁",
-        "我有哪些老师",
-        "我的老师有谁",
-        "谁是我的老师",
-    ),
-    ("relation", "同事"): (
-        "我的同事是谁",
-        "我有哪些同事",
-        "我的同事有谁",
-        "谁是我的同事",
-    ),
-    ("relation", "家人"): (
-        "我的家人是谁",
-        "我有哪些家人",
-        "我的家人有谁",
-        "谁是我的家人",
-    ),
-    ("preference", "likes"): (
-        "我喜欢什么",
-        "我都喜欢什么",
-        "whatdoilike",
-    ),
-    ("preference", "dislikes"): (
-        "我不喜欢什么",
-        "我讨厌什么",
-        "whatdontilike",
-        "whatdoinotlike",
-    ),
+    ("relation", "朋友"): ("我的朋友是谁", "我有哪些朋友", "我的朋友有谁", "谁是我的朋友"),
+    ("relation", "同学"): ("我的同学是谁", "我有哪些同学", "我的同学有谁", "谁是我的同学"),
+    ("relation", "老师"): ("我的老师是谁", "我有哪些老师", "我的老师有谁", "谁是我的老师"),
+    ("relation", "同事"): ("我的同事是谁", "我有哪些同事", "我的同事有谁", "谁是我的同事"),
+    ("relation", "家人"): ("我的家人是谁", "我有哪些家人", "我的家人有谁", "谁是我的家人"),
+    ("preference", "likes"): ("我喜欢什么", "我都喜欢什么", "whatdoilike"),
+    ("preference", "dislikes"): ("我不喜欢什么", "我讨厌什么", "whatdontilike", "whatdoinotlike"),
 }
 
 
 def fact_query_route(text: str) -> tuple[str, str] | None:
     """Map supported conversational questions to stored predicates before lexical retrieval."""
     compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text).casefold()
-    # Longer aliases first so “我不喜欢什么” is not swallowed by “我喜欢什么”.
     for route, aliases in sorted(
-        _FACT_QUERY_ALIASES.items(),
-        key=lambda item: -max(len(alias) for alias in item[1]),
+        _FACT_QUERY_ALIASES.items(), key=lambda item: -max(len(alias) for alias in item[1])
     ):
         if any(alias in compact for alias in aliases):
             return route
@@ -194,7 +157,6 @@ class Context:
                 for episode in self.episodes
             ],
         }
-        # State data stays outside the system role. Historical messages remain quoted data.
         return [
             {"role": "system", "content": IDENTITY},
             {
@@ -225,7 +187,6 @@ def build_context(
         facts = [f for f in memory.facts(predicate, limit=20) if f.kind == kind][:8]
     else:
         facts = (retriever or memory).retrieve(text, limit=8)
-        # Queries about preferences need category retrieval even without object keywords.
         folded = text.casefold()
         if any(w in folded for w in ("喜欢什么", "喜好", "讨厌什么", "what do i like")):
             predicate = (
@@ -234,11 +195,8 @@ def build_context(
             facts = memory.facts(predicate, limit=8)
     if is_recall_query(text):
         topics = recall_topics(text)
-        # Search the actual topic, so high-importance boilerplate does not consume the top slots.
         episodes = memory.retrieve_episodes(" ".join(sorted(topics)), 4) if topics else []
         episodes = [episode for episode in episodes if topics & tokens(episode["summary"])]
-        # Profile questions like “还记得我住哪吗” are fact routes. Do not let recall
-        # topic-filtering erase the already selected living-place / birthday evidence.
         if route is None:
             facts = [fact for fact in facts if topics & tokens(fact.text())]
             events = [
