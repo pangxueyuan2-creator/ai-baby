@@ -28,6 +28,19 @@ def test_bounded_slow_changes():
     assert all(0 <= v <= 100 for v in record(state).values())
 
 
+def test_neutral_chatter_cannot_farm_trust_attachment_or_closeness():
+    initial = Relationship()
+    state = initial
+    for _ in range(500):
+        state = update(state, "neutral")
+
+    assert state.trust == initial.trust
+    assert state.attachment == initial.attachment
+    assert state.closeness == initial.closeness
+    assert state.playfulness == initial.playfulness
+    assert 0 < state.familiarity < 10
+
+
 def test_emotion_moves_gradually():
     result = emotion_update(Emotion("calm", 0.2), "hostile", False)
     assert result.label == "annoyed"
