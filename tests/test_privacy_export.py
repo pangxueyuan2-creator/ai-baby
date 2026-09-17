@@ -69,7 +69,9 @@ def test_include_history_and_inactive_are_explicit_opt_ins(tmp_path):
     payload = build_privacy_export(path, include_history=True, include_inactive=True)
 
     assert [item["role"] for item in payload["history"]["messages"]] == ["user", "assistant"]
-    assert payload["history"]["messages"][0]["content"] == "this transcript stays private by default"
+    assert (
+        payload["history"]["messages"][0]["content"] == "this transcript stays private by default"
+    )
     cat_facts = [fact for fact in payload["facts"] if fact["value"] == "cats"]
     assert len(cat_facts) == 2
     assert {fact["active"] for fact in cat_facts} == {0, 1}
