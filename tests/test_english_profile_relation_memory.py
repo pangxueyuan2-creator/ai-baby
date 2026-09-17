@@ -73,6 +73,13 @@ def test_period_split_preserves_period_inside_relation_name(baby):
     assert "Alice" in baby.chat("Who are my friends?").text
 
 
+def test_period_split_preserves_period_inside_profile_value(baby):
+    baby.chat("I live in St. Louis. My birthday is June 1.")
+
+    assert "St. Louis" in baby.chat("Where do I live?").text
+    assert "June 1" in baby.chat("When is my birthday?").text
+
+
 @pytest.mark.parametrize(
     "statement,predicate,forbidden",
     [
