@@ -122,6 +122,8 @@ _FACT_QUERY_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
         "我在哪住",
         "我的居住地是什么",
         "我的居住地在哪里",
+        "wheredoilive",
+        "whereamiliving",
     ),
     ("personal", "生日"): (
         "我的生日是哪天",
@@ -130,6 +132,9 @@ _FACT_QUERY_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
         "我什么时候生日",
         "我生日几号",
         "我的生日几号",
+        "whenismybirthday",
+        "whatismybirthday",
+        "whatsmybirthday",
     ),
     ("personal", "职业"): (
         "我做什么工作",
@@ -137,12 +142,53 @@ _FACT_QUERY_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
         "我干什么工作",
         "我的职业是什么",
         "我的职业是啥",
+        "whatdoidoforwork",
+        "whatismyjob",
+        "whatsmyjob",
+        "whatismyprofession",
     ),
-    ("relation", "朋友"): ("我的朋友是谁", "我有哪些朋友", "我的朋友有谁", "谁是我的朋友"),
-    ("relation", "同学"): ("我的同学是谁", "我有哪些同学", "我的同学有谁", "谁是我的同学"),
-    ("relation", "老师"): ("我的老师是谁", "我有哪些老师", "我的老师有谁", "谁是我的老师"),
-    ("relation", "同事"): ("我的同事是谁", "我有哪些同事", "我的同事有谁", "谁是我的同事"),
-    ("relation", "家人"): ("我的家人是谁", "我有哪些家人", "我的家人有谁", "谁是我的家人"),
+    ("relation", "朋友"): (
+        "我的朋友是谁",
+        "我有哪些朋友",
+        "我的朋友有谁",
+        "谁是我的朋友",
+        "whoaremyfriends",
+        "whoismyfriend",
+    ),
+    ("relation", "同学"): (
+        "我的同学是谁",
+        "我有哪些同学",
+        "我的同学有谁",
+        "谁是我的同学",
+        "whoaremyclassmates",
+        "whoismyclassmate",
+    ),
+    ("relation", "老师"): (
+        "我的老师是谁",
+        "我有哪些老师",
+        "我的老师有谁",
+        "谁是我的老师",
+        "whoaremyteachers",
+        "whoismyteacher",
+    ),
+    ("relation", "同事"): (
+        "我的同事是谁",
+        "我有哪些同事",
+        "我的同事有谁",
+        "谁是我的同事",
+        "whoaremycoworkers",
+        "whoismycoworker",
+        "whoaremycolleagues",
+        "whoismycolleague",
+    ),
+    ("relation", "家人"): (
+        "我的家人是谁",
+        "我有哪些家人",
+        "我的家人有谁",
+        "谁是我的家人",
+        "whoaremyfamilymembers",
+        "whoismyfamilymember",
+    ),
     ("preference", "likes"): ("我喜欢什么", "我都喜欢什么", "whatdoilike"),
     ("preference", "dislikes"): ("我不喜欢什么", "我讨厌什么", "whatdontilike", "whatdoinotlike"),
 }
@@ -150,7 +196,7 @@ _FACT_QUERY_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
 
 def fact_query_route(text: str) -> tuple[str, str] | None:
     """Map supported conversational questions to stored predicates before lexical retrieval."""
-    compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text).casefold()
+    compact = re.sub(r"[\s，,。！？!?；;：:'’]+", "", text).casefold()
     for route, aliases in sorted(
         _FACT_QUERY_ALIASES.items(), key=lambda item: -max(len(alias) for alias in item[1])
     ):
