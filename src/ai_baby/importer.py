@@ -23,6 +23,7 @@ from .models import (
     record,
     safe_output,
 )
+from .privacy_checksum import verify_checksum_manifest
 from .storage_files import reserve_private_file
 
 EXIT_OK = 0
@@ -110,7 +111,7 @@ def _validate_portable_references(portable: dict[str, Any]) -> None:
             raise ValueError("episode 引用了未包含在默认隐私导出中的 fact。")
 
 
-def load_privacy_export(source: Path) -> dict[str, Any]:
+def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict[str, Any]:
     """Read and fully validate a portable default privacy export without creating a database."""
     source = source.expanduser()
     if not source.is_file():
@@ -118,6 +119,11 @@ def load_privacy_export(source: Path) -> dict[str, Any]:
     try:
         if source.stat().st_size > MAX_EXPORT_BYTES:
             raise ValueError("隐私导出文件过大；当前版本最多导入 20 MiB。")
+    except OSError as exc:
+        raise ValueError("无法读取隐私导出文件。") from exc
+
+    verify_checksum_manifest(source, required=require_checksum)
+    try:
         payload = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeError) as exc:
         raise ValueError("无法读取隐私导出文件。") from exc
@@ -221,9 +227,11 @@ def load_privacy_export(source: Path) -> dict[str, Any]:
     return portable
 
 
-def preflight_privacy_export(source: Path) -> dict[str, Any]:
+def preflight_privacy_export(
+    source: Path, *, require_checksum: bool = False
+) -> dict[str, Any]:
     """Validate a portable export completely without creating a data directory or database."""
-    portable = load_privacy_export(source)
+    portable = load_privacy_export(source, require_checksum=require_checksum)
     return {
         "status": "ok",
         "mode": "check",
@@ -244,9 +252,11 @@ def _cleanup_database(database: Path) -> None:
         candidate.unlink(missing_ok=True)
 
 
-def import_privacy_export(source: Path, data_dir: Path) -> dict[str, Any]:
+def import_privacy_export(
+    source: Path, data_dir: Path, *, require_checksum: bool = False
+) -> dict[str, Any]:
     """Create one new database from visible active data; never overwrite an existing baby."""
-    portable = load_privacy_export(source)
+    portable = load_privacy_export(source, require_checksum=require_checksum)
     data_dir = data_dir.expanduser()
     database = data_dir / "baby.sqlite3"
     if os.path.lexists(database):
@@ -332,14 +342,25 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="只做完整导入预检，不创建数据目录或 SQLite 数据库",
     )
+    parser.add_argument(
+        "--require-checksum",
+        action="store_true",
+        help="要求相邻 .sha256 校验文件存在且匹配；适合 CI 和跨机器迁移",
+    )
     parser.add_argument("--json", action="store_true", help="输出稳定 JSON，便于脚本和 CI 使用")
     args = parser.parse_args(argv)
 
     try:
         if args.check:
-            result = preflight_privacy_export(args.source)
+            result = preflight_privacy_export(
+                args.source, require_checksum=args.require_checksum
+            )
         else:
-            result = import_privacy_export(args.source, args.data_dir or _default_data_dir())
+            result = import_privacy_export(
+                args.source,
+                args.data_dir or _default_data_dir(),
+                require_checksum=args.require_checksum,
+            )
     except (MemoryError, ValueError) as exc:
         message = str(exc)
         if args.json:
