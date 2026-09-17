@@ -15,7 +15,7 @@ def _direct_clauses(text: str) -> list[str]:
         for clause in clauses
         if not any(marker in clause for marker in ("?", "？", "吗", "如果", "假如", "假设", "是否"))
         and not re.search(
-            r"(?:他|她|别人|有人)(?:对我)?说|(?:不要|别|没有|没|不曾|不是|不许|并非|从没)(?:再)?说|台词|例句|[“”‘’\"'「」]",
+            r"(?:他|她|别人|有人)(?:对我)?说|(?:不要|别|没有|没|不曾|不是|不许|并非|从没)(?:再)?说|台词|例句|[“”‘’"\'「」]",
             clause,
         )
     ]
@@ -39,7 +39,21 @@ def classify(text: str, state: Relationship) -> str:
     clauses = _direct_clauses(text)
     if _affirmed(clauses, ("你去死", "我恨你", "你真恶心", "我要伤害你")):
         return "hostile"
-    if _affirmed(clauses, ("今天很难过", "我很难过", "我很伤心", "我很累", "心情不好")):
+    if _affirmed(
+        clauses,
+        (
+            "今天很难过",
+            "我很难过",
+            "我很伤心",
+            "我很累",
+            "心情不好",
+            "今天有点累",
+            "有点累",
+            "好累",
+            "有点难过",
+            "不太舒服",
+        ),
+    ):
         return "distress"
     if _affirmed(clauses, ("你个笨蛋", "你真笨", "小笨蛋")):
         friendly = state.familiarity >= 20 and state.trust >= 25
