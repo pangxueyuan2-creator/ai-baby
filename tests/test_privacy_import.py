@@ -12,6 +12,7 @@ from ai_baby.export import build_privacy_export, write_privacy_export
 from ai_baby.importer import EXIT_INVALID, EXIT_OK, import_privacy_export, preflight_privacy_export
 from ai_baby.memory import MemoryStore
 from ai_baby.models import Profile, Relationship
+from ai_baby.privacy_checksum import checksum_manifest_path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -134,8 +135,40 @@ def test_import_race_never_deletes_a_destination_created_by_someone_else(tmp_pat
     assert target.read_bytes() == sentinel
 
 
+def test_tampered_export_is_rejected_before_destination_creation(tmp_path):
+    source = make_export(tmp_path)
+    source.write_bytes(source.read_bytes() + b" \n")
+    target_dir = tmp_path / "tampered-target"
+
+    with pytest.raises(ValueError, match="SHA-256 校验失败"):
+        import_privacy_export(source, target_dir)
+
+    assert not target_dir.exists()
+
+
+def test_old_export_without_checksum_is_compatible_unless_checksum_is_required(tmp_path):
+    source = make_export(tmp_path)
+    checksum_manifest_path(source).unlink()
+
+    assert preflight_privacy_export(source)["status"] == "ok"
+    with pytest.raises(ValueError, match="缺少 SHA-256 校验文件"):
+        preflight_privacy_export(source, require_checksum=True)
+
+
+def test_malformed_checksum_is_rejected_before_json_validation(tmp_path):
+    source = make_export(tmp_path)
+    checksum_manifest_path(source).write_text("not-a-checksum\n", encoding="ascii")
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["episodes"][0]["fact_id"] = 999999
+    source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="校验文件格式无效"):
+        preflight_privacy_export(source)
+
+
 def test_broken_episode_fact_reference_is_rejected_before_destination_creation(tmp_path):
     source = make_export(tmp_path)
+    checksum_manifest_path(source).unlink()
     payload = json.loads(source.read_text(encoding="utf-8"))
     assert payload["episodes"][0]["fact_id"] is not None
     payload["episodes"][0]["fact_id"] = 999999
@@ -163,6 +196,7 @@ def test_preflight_reports_portable_counts_and_rejects_broken_references(tmp_pat
         "profile_imported": True,
     }
 
+    checksum_manifest_path(source).unlink()
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["episodes"][0]["fact_id"] = 999999
     source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -189,6 +223,7 @@ def test_import_check_cli_is_read_only_and_ignores_provider_configuration(tmp_pa
             "ai_baby.importer",
             str(source),
             "--check",
+            "--require-checksum",
             "--json",
         ],
         encoding="utf-8",
@@ -209,6 +244,7 @@ def test_import_check_cli_is_read_only_and_ignores_provider_configuration(tmp_pa
 
 def test_import_check_cli_rejects_broken_reference_without_creating_default_data_dir(tmp_path):
     source = make_export(tmp_path)
+    checksum_manifest_path(source).unlink()
     payload = json.loads(source.read_text(encoding="utf-8"))
     payload["episodes"][0]["fact_id"] = 999999
     source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -262,6 +298,7 @@ def test_import_cli_ignores_unrelated_provider_configuration(tmp_path):
             str(source),
             "--data-dir",
             str(target_dir),
+            "--require-checksum",
             "--json",
         ],
         encoding="utf-8",
