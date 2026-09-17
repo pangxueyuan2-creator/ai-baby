@@ -32,7 +32,9 @@ def restore_backup(source: Path, data_dir: Path) -> Path:
         staged = Path(temporary) / "baby.sqlite3"
         try:
             with (
-                closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as reader,
+                closing(
+                    sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
+                ) as reader,
                 closing(sqlite3.connect(staged)) as target,
             ):
                 check = reader.execute("PRAGMA quick_check").fetchone()
