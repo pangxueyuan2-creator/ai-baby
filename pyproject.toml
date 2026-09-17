@@ -18,6 +18,7 @@ dev = ["pytest>=8,<10", "ruff>=0.11,<1", "build>=1,<2"]
 
 [project.scripts]
 ai-baby = "ai_baby.main:main"
+ai-baby-backup = "ai_baby.backup:main"
 ai-baby-doctor = "ai_baby.doctor:main"
 ai-baby-restore = "ai_baby.restore:main"
 
