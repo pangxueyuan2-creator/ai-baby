@@ -8,7 +8,7 @@ from .base import BaseLLMProvider
 def _fact_sentence(fact: Fact) -> str:
     """Render stored triples as normal Chinese instead of exposing internal predicates."""
     if fact.kind == "preference":
-        return f"你{'喜欢' if fact.predicate == 'likes' else '不喜欢'}{fact.value}"
+        return f"你{'\u559c\u6b22' if fact.predicate == 'likes' else '\u4e0d\u559c\u6b22'}{fact.value}"
     if fact.kind == "personal":
         return {
             "居住地": f"你住在{fact.value}",
@@ -65,8 +65,6 @@ class MockProvider(BaseLLMProvider):
             ]
             return f"你保存的性别选择是“{gender}”，我称呼你为{address}。"
 
-        # Explicit memory questions take priority over tone. "谢谢，我住在哪里？" should
-        # answer the saved profile fact instead of being swallowed by the gentle-tone policy.
         route = fact_query_route(text)
         if route is not None:
             kind, predicate = route
@@ -97,6 +95,15 @@ class MockProvider(BaseLLMProvider):
                 if values
                 else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。"
             )
+        named_preferences = [
+            fact
+            for fact in context.facts
+            if fact.kind == "preference" and fact.value and fact.value in text
+        ]
+        if named_preferences:
+            fact = named_preferences[0]
+            verb = "喜欢" if fact.predicate == "likes" else "不喜欢"
+            return f"你告诉过我，你{verb}{fact.value}。"
         if is_recall_query(text):
             if context.episodes:
                 return "我找到以前保存的经历：" + "；".join(
@@ -139,12 +146,14 @@ class MockProvider(BaseLLMProvider):
             summaries = [e["summary"] for e in context.episodes]
             return f"我现在处于 {context.growth.stage} 阶段。最近记下了：" + "；".join(summaries)
         if any(w in text for w in ("你好", "早上好", "晚上好")):
-            return f"{address}你好！我在这里，可以继续聊今天的新鲜事。"
+            if context.growth.stage in {"newborn", "baby"}:
+                return f"{address}你好！我在这里，可以继续聊今天的新鲜事。"
+            if context.growth.stage == "child":
+                return f"{address}你好。我还记得我们最近聊过的事，想接着说哪一件？"
+            return f"{address}你好。有想核对的旧记忆，或想新教我的内容，都可以直接说。"
         if any(w in text for w in ("再见", "晚安")):
             return f"{address}，下次见。记忆已经保存在本地，你可以随时退出。"
 
-        # Never label an arbitrary retrieved row as "related" just because lexical retrieval
-        # happened to return something. If no answer policy has evidence, admit the gap.
         curious = (
             "可以用“学习：事物是……”教我。"
             if context.growth.stage in {"newborn", "baby"}
