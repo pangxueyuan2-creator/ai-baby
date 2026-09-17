@@ -14,9 +14,7 @@ def test_still_preferences_are_saved_as_explicit_assertions(baby, text, value, p
     baby.chat(text)
 
     matches = [
-        fact
-        for fact in baby.memory.facts()
-        if fact.kind == "preference" and fact.value == value
+        fact for fact in baby.memory.facts() if fact.kind == "preference" and fact.value == value
     ]
 
     assert len(matches) == 1
@@ -42,9 +40,7 @@ def test_still_preference_replaces_previous_opposite_value(baby):
     baby.chat("我还是喜欢草莓。")
 
     active = [
-        fact
-        for fact in baby.memory.facts()
-        if fact.kind == "preference" and fact.value == "草莓"
+        fact for fact in baby.memory.facts() if fact.kind == "preference" and fact.value == "草莓"
     ]
 
     assert len(active) == 1
