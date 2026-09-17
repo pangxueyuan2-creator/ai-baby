@@ -59,8 +59,7 @@ def diagnose_database(path: Path, *, full: bool = False) -> dict[str, Any]:
             tables = {
                 row[0]
                 for row in db.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
                 )
             }
 
@@ -116,9 +115,9 @@ def diagnose_database(path: Path, *, full: bool = False) -> dict[str, Any]:
 
             counts = {
                 "profile": db.execute("SELECT count(*) FROM profile").fetchone()[0],
-                "active_facts": db.execute(
-                    "SELECT count(*) FROM facts WHERE active=1"
-                ).fetchone()[0],
+                "active_facts": db.execute("SELECT count(*) FROM facts WHERE active=1").fetchone()[
+                    0
+                ],
                 "active_episodes": db.execute(
                     "SELECT count(*) FROM episodes WHERE active=1"
                 ).fetchone()[0],
