@@ -6,18 +6,26 @@ from pathlib import Path
 
 from .memory import MemoryStore
 from .migrations import SCHEMA_VERSION
-from .models import Emotion, Growth, GrowthMetrics, PersonalityState, Relationship, record
+from .models import (
+    Emotion,
+    Growth,
+    GrowthMetrics,
+    PersonalityState,
+    Relationship,
+    parse_memory_id,
+    record,
+)
 
 
 def forget(memory: MemoryStore, fact_id: int) -> bool:
-    """Deactivate a fact and derived recall; not forensic secure erasure."""
+    """Forget active or superseded facts and derived recall; not secure erasure."""
+    fact_id = parse_memory_id(fact_id)
     with memory.transaction():
-        fact = memory.db.execute(
-            "SELECT value FROM facts WHERE id=? AND active=1", (fact_id,)
-        ).fetchone()
-        cursor = memory.db.execute("UPDATE facts SET active=0 WHERE id=? AND active=1", (fact_id,))
-        if cursor.rowcount == 0:
+        fact = memory.db.execute("SELECT value FROM facts WHERE id=?", (fact_id,)).fetchone()
+        if fact is None:
             return False
+        # Supersession only retired factual recall; history/journals may still contain it.
+        memory.db.execute("UPDATE facts SET active=0 WHERE id=? AND active=1", (fact_id,))
         normalized = memory.normalize(fact[0])
         memory.db.execute("UPDATE episodes SET active=0 WHERE fact_id=?", (fact_id,))
         # Forget is an infrequent explicit operation. A normalized pass also finds
@@ -25,7 +33,7 @@ def forget(memory: MemoryStore, fact_id: int) -> bool:
         episode_ids = [
             (row["id"],)
             for row in memory.db.execute("SELECT id,summary FROM episodes WHERE active=1")
-            if normalized in memory.normalize(row["summary"])
+            if normalized and normalized in memory.normalize(row["summary"])
         ]
         memory.db.executemany("UPDATE episodes SET active=0 WHERE id=?", episode_ids)
         memory.db.execute(
@@ -34,7 +42,7 @@ def forget(memory: MemoryStore, fact_id: int) -> bool:
         topics = [
             (row["topic"],)
             for row in memory.db.execute("SELECT topic,question FROM curiosity WHERE question!=''")
-            if normalized in memory.normalize(row["question"])
+            if normalized and normalized in memory.normalize(row["question"])
         ]
         memory.db.executemany(
             "UPDATE curiosity SET status='ignored',question='' WHERE topic=?", topics
@@ -55,6 +63,19 @@ def forget(memory: MemoryStore, fact_id: int) -> bool:
         memory.save_state("growth", growth)
         memory.save_state("growth_metrics", metrics)
     return True
+
+
+def memory_page(memory: MemoryStore, before_id: str | int | None = None) -> list[dict]:
+    """Explicit local inspection of 20 facts, including retired versions, by stable ID."""
+    columns = "id,kind,subject,predicate,value,active"
+    if before_id is None:
+        rows = memory.db.execute(f"SELECT {columns} FROM facts ORDER BY id DESC LIMIT 20")
+    else:
+        rows = memory.db.execute(
+            f"SELECT {columns} FROM facts WHERE id<? ORDER BY id DESC LIMIT 20",
+            (parse_memory_id(before_id),),
+        )
+    return [dict(row) for row in rows]
 
 
 def export_data(memory: MemoryStore, destination: Path) -> None:
@@ -95,11 +116,20 @@ def export_data(memory: MemoryStore, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation prevents accidental overwrite. A failed write removes only our file.
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+    try:
+        output = os.fdopen(descriptor, "w", encoding="utf-8")
+    except BaseException:
+        # fdopen did not take ownership; do not leak a descriptor on setup failure.
         try:
+            os.close(descriptor)
+        finally:
+            destination.unlink(missing_ok=True)
+        raise
+    try:
+        with output:
             json.dump(payload, output, ensure_ascii=False, indent=2)
             output.write("\n")
-        except BaseException:
-            output.close()
-            destination.unlink(missing_ok=True)
-            raise
+    except BaseException:
+        # Buffered writes can fail during __exit__/close, not only during json.dump.
+        destination.unlink(missing_ok=True)
+        raise

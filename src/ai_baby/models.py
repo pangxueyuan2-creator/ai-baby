@@ -14,6 +14,24 @@ def clean_text(value: str, maximum: int = 2000) -> str:
     return value
 
 
+def parse_memory_id(value: str | int) -> int:
+    """Validate a positive SQLite ID before binding; never echo private input."""
+    message = "请提供有效的正整数记忆 ID；先用 /memories 或 /candidates 查看。"
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError(message)
+    if isinstance(value, str):
+        if not value.isascii() or not value.isdecimal():
+            raise ValueError(message)
+        digits = value.lstrip("0")
+        # Bound conversion as well as the subsequent SQLite integer binding.
+        if not digits or len(digits) > 19:
+            raise ValueError(message)
+        value = int(digits)
+    if not 0 < value < 2**63:
+        raise ValueError(message)
+    return value
+
+
 def safe_output(value: str) -> str:
     """Prevent model responses from injecting terminal escape sequences."""
     return "".join(c for c in value if c == "\n" or (ord(c) >= 32 and not 127 <= ord(c) <= 159))

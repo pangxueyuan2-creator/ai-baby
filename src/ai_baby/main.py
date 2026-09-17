@@ -11,7 +11,16 @@ from . import journal, management
 from .baby import Baby, TurnConflict
 from .config import Config
 from .memory import MemoryError, MemoryStore
-from .models import Emotion, Growth, PersonalityState, Relationship, clean_text, record, safe_output
+from .models import (
+    Emotion,
+    Growth,
+    PersonalityState,
+    Relationship,
+    clean_text,
+    parse_memory_id,
+    record,
+    safe_output,
+)
 from .providers import MockProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
 
@@ -27,12 +36,13 @@ HELP = """
 /name 名字   更新名字
 /address 称呼  更新称呼（可自由选择，无需性别推断）
 /memories    查看最近 20 条有效事实
+/memories --all [ID]  查看含旧版本的 20 条事实；可指定更早页的 ID
 /events      查看最近 10 条重要经历
 /backup      在数据目录创建一致性数据库备份
 /personality 查看长期形成的个体人格（模拟状态）
 /journal     巩固经历并查看最近成长日记
 /export      将角色数据导出到数据目录/exports（含私人信息）
-/forget ID   让指定事实失效，并清理对话和日记以避免再次想起
+/forget ID   遗忘当前或旧版本事实，并清理对话和日记以避免再次想起
 /confirm ID  确认候选记忆；/reject ID 忽略候选
 /candidates  查看最多三条待确认记忆
 /baby-name 名字  给宝宝取名
@@ -79,10 +89,8 @@ def command(baby: Baby, text: str) -> bool:
     """Run a local command. Return false only for explicit exit."""
     name, _, argument = text.partition(" ")
     memory = baby.memory
-    if name in {"/forget", "/confirm", "/reject"} and (
-        not argument.isascii() or not argument.isdecimal() or not 0 < int(argument) < 2**63
-    ):
-        raise ValueError("请提供有效的正整数记忆 ID；先用 /memories 或 /candidates 查看。")
+    if name in {"/forget", "/confirm", "/reject"}:
+        argument = str(parse_memory_id(argument))
     if name in {"/quit", "/exit"}:
         with memory.transaction():
             journal.consolidate(memory, force=True)
@@ -103,7 +111,23 @@ def command(baby: Baby, text: str) -> bool:
     elif name == "/address":
         print("称呼已更新：" + baby.change_profile(address=clean_text(argument, 80)).address)
     elif name == "/memories":
-        print("\n".join(f"#{f.id} {f.text()}" for f in memory.facts()) or "还没有学到事实。")
+        if not argument:
+            print("\n".join(f"#{f.id} {f.text()}" for f in memory.facts()) or "还没有学到事实。")
+        else:
+            parts = argument.split()
+            if parts[0] != "--all" or len(parts) > 2:
+                raise ValueError("用法：/memories 或 /memories --all [更早页的 ID]。")
+            rows = management.memory_page(memory, parts[1] if len(parts) == 2 else None)
+            print(
+                "\n".join(
+                    f"#{row['id']} [{'有效' if row['active'] else '已失效'}] "
+                    f"{row['subject']} · {row['predicate']} · {row['value']}"
+                    for row in rows
+                )
+                or "没有更多事实。"
+            )
+            if len(rows) == 20:
+                print(f"更早记录：/memories --all {rows[-1]['id']}")
     elif name == "/events":
         print(
             "\n".join(
@@ -131,7 +155,7 @@ def command(baby: Baby, text: str) -> bool:
         print(
             "记忆已失效；历史对话和日记已清理。"
             if management.forget(memory, int(argument))
-            else "没有找到有效的事实 ID。"
+            else "没有找到这个事实 ID；可用 /memories --all 查看旧版本。"
         )
     elif name == "/confirm":
         print(baby.name + "：" + baby.chat(f"确认记忆 {int(argument)}").text)
