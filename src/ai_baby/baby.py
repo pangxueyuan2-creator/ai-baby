@@ -118,9 +118,11 @@ class Baby:
         relation = relationship.update(relation, tone)
         new_emotion = emotions.update(emotion, tone, learning.learned > 0)
         if tone in {"hostile", "distress", "gentle"} and new_emotion.label != emotion.label:
+            # Unlinked raw excerpts can outlive forgotten facts after truncation.
+            # Keep only software-state metadata; learning records have fact provenance.
             self.memory.episode(
                 "emotion",
-                f"互动情境：{tone}；模拟状态变为 {new_emotion.label}。用户说：{text[:180]}",
+                f"互动情境：{tone}；模拟状态变为 {new_emotion.label}。",
             )
         metrics = self.memory.growth_metrics(relation, previous.active_seconds)
         state = growth.update(previous, metrics, relation, elapsed)

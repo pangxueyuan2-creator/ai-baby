@@ -16,6 +16,9 @@ from ai_baby.models import Growth, PersonalityState, Relationship
         ("其实草莓是我最喜欢的水果。", "preference", "草莓"),
         ("我现在住杭州。", "personal", "杭州"),
         ("我的朋友叫小明。", "relation", "小明"),
+        ("我也喜欢下雨天。", "preference", "下雨天"),
+        ("我还喜欢看书。", "preference", "看书"),
+        ("我超喜欢火锅。", "preference", "火锅"),
     ],
 )
 def test_explicit_natural_statements(baby, text, kind, value):

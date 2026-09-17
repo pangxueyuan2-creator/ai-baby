@@ -28,6 +28,13 @@ def forget(memory: MemoryStore, fact_id: int) -> bool:
         memory.db.execute("UPDATE facts SET active=0 WHERE id=? AND active=1", (fact_id,))
         normalized = memory.normalize(fact[0])
         memory.db.execute("UPDATE episodes SET active=0 WHERE fact_id=?", (fact_id,))
+        # Older emotion entries embedded truncated user text without fact provenance.
+        # Full-value matching cannot find partial copies: conservatively retire all
+        # such legacy excerpts on an explicit forget, even if their topic differs.
+        memory.db.execute(
+            "UPDATE episodes SET active=0 WHERE active=1 AND kind='emotion' "
+            "AND instr(summary,'用户说：')>0"
+        )
         # Forget is an infrequent explicit operation. A normalized pass also finds
         # case/whitespace variants in unlinked v1 or emotional summaries.
         episode_ids = [

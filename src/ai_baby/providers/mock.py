@@ -1,6 +1,6 @@
 """Honest offline baseline using retrieved evidence and composable response policies."""
 
-from ..conversation import Context, fact_query_route, is_recall_query
+from ..conversation import Context, fact_query_route, is_experience_query, is_recall_query
 from ..models import Fact
 from .base import BaseLLMProvider
 
@@ -18,8 +18,24 @@ def _fact_sentence(fact: Fact) -> str:
     if fact.kind == "world" and fact.predicate == "是":
         return f"{fact.subject}是{fact.value}"
     if fact.kind == "relation":
-        return f"{fact.subject}的{fact.predicate}是{fact.value}"
+        owner = "你" if fact.subject in {"我", "用户"} else fact.subject
+        return f"{owner}的{fact.predicate}是{fact.value}"
     return fact.value
+
+
+def _episode_sentence(summary: str) -> str:
+    """Hide the internal subject · predicate · value dump in recalled episodes."""
+    parts = [part.strip() for part in summary.split(" · ")]
+    if len(parts) == 3 and parts[1] == "经历":
+        return parts[2]
+    if len(parts) == 3 and parts[0] in {"用户", "我"}:
+        predicate, value = parts[1], parts[2]
+        if predicate == "likes":
+            return f"你喜欢{value}"
+        if predicate == "dislikes":
+            return f"你不喜欢{value}"
+        return f"你的{predicate}是{value}" if predicate in {"居住地", "生日", "职业"} else value
+    return summary
 
 
 def _learning_reply(context: Context) -> str | None:
@@ -65,8 +81,6 @@ class MockProvider(BaseLLMProvider):
             ]
             return f"你保存的性别选择是“{gender}”，我称呼你为{address}。"
 
-        # Explicit memory questions take priority over tone. "谢谢，我住在哪里？" should
-        # answer the saved profile fact instead of being swallowed by the gentle-tone policy.
         route = fact_query_route(text)
         if route is not None:
             kind, predicate = route
@@ -80,10 +94,15 @@ class MockProvider(BaseLLMProvider):
                     return f"你告诉过我，你的职业是{values[0]}。"
                 if kind == "relation":
                     return f"我记得你的{predicate}有：" + "、".join(values) + "。"
+                if kind == "preference":
+                    verb = "不喜欢" if predicate == "dislikes" else "喜欢"
+                    return f"你{verb}" + "、".join(values) + "。"
             prompts = {
                 ("personal", "居住地"): "你还没有告诉我你住在哪里。",
                 ("personal", "生日"): "你还没有告诉我你的生日。",
                 ("personal", "职业"): "你还没有告诉我你的职业。",
+                ("preference", "likes"): "你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。",
+                ("preference", "dislikes"): "你还没有告诉我这方面的偏好。",
             }
             prompt = prompts.get(route, f"你还没有告诉我谁是你的{predicate}。")
             return f"{address}，{prompt}"
@@ -97,12 +116,22 @@ class MockProvider(BaseLLMProvider):
                 if values
                 else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。"
             )
-        if is_recall_query(text):
+        events = [fact for fact in context.facts if fact.kind == "event"]
+        if is_recall_query(text) or is_experience_query(text):
+            if events:
+                return "我记得：" + "；".join(fact.value for fact in events[:2]) + "。"
             if context.episodes:
                 return "我找到以前保存的经历：" + "；".join(
-                    e["summary"] for e in context.episodes[:2]
+                    _episode_sentence(episode["summary"]) for episode in context.episodes[:2]
                 )
             return "我在本地记忆中没有找到这段共同经历，不能确定我们以前是否谈过。"
+        mentioned = [
+            fact
+            for fact in events
+            if len(token := text.strip().strip("。！？!? ")) >= 2 and token in fact.value
+        ]
+        if mentioned and not any(w in text for w in ("吃", "喝", "工作", "职业")):
+            return "我记得：" + mentioned[0].value + "。"
 
         subjects = [
             f
@@ -124,9 +153,6 @@ class MockProvider(BaseLLMProvider):
                 "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
             )
 
-        # A vague "X呢？" may safely surface the exact matching stored item. This is narrower
-        # than the old facts[0] fallback: questions about an unknown property of X still admit
-        # that the answer is unknown instead of presenting an unrelated relationship as evidence.
         compact = text.strip().strip("。！？!? ")
         exact_mentions = [
             fact for fact in context.facts if compact in {fact.value + "呢", fact.subject + "呢"}
@@ -158,11 +184,24 @@ class MockProvider(BaseLLMProvider):
             return f"{address}你好。有想核对的旧记忆，或想新教我的内容，都可以直接说。"
         if any(w in text for w in ("再见", "晚安")):
             return f"{address}，下次见。记忆已经保存在本地，你可以随时退出。"
+        if any(w in text for w in ("想我了吗", "想不想我", "有没有想我")):
+            return f"{address}，我没有真实想念，但本地还留着我们说过的话。你回来就可以继续聊。"
+        if any(w in text for w in ("讲个故事", "讲故事", "说个故事")):
+            taught = [fact for fact in context.facts if fact.kind in {"world", "event"}][:2]
+            if taught:
+                return (
+                    f"{address}，我还小，不会编新故事。我记得你告诉过我："
+                    + "；".join(_fact_sentence(fact) for fact in taught)
+                    + "。"
+                )
+            return f"{address}，我还小，不会编新故事。你先讲一件事，我可以帮你记住。"
+        if any(w in text for w in ("你觉得我怎么样", "我这个人怎么样")):
+            return f"{address}，我没有真实评价，只记得你是照顾我的{address}，叫{context.profile.name}。"
+        if any(w in text.casefold() for w in ("1+1", "一加一")):
+            return "这是一般知识：1+1等于2。不是你专门教过我的。"
 
-        # Never label an arbitrary retrieved row as "related" just because lexical retrieval
-        # happened to return something. If no answer policy has evidence, admit the gap.
         curious = (
-            "可以用“学习：事物是……”教我。"
+            "你可以直接告诉我，比如“海豚是哺乳动物”。"
             if context.growth.stage in {"newborn", "baby"}
             else "我们可以先讲一个例子，再把原因和之前学到的内容联系起来。"
         )
@@ -173,4 +212,4 @@ class MockProvider(BaseLLMProvider):
             "baby",
         }:
             curious = "我愿意试着联系已有的知识，但会区分猜测和记忆。"
-        return f"{address}，我听到了你说的“{text[:100]}”。我还没有学过相关知识。{curious}（当前为基础离线模式。）"
+        return f"{address}，我听到了你说的“{text[:100]}”。我还没有学过相关知识。{curious}"

@@ -137,7 +137,16 @@ Curiosity can schedule one question after at least six turns, then no more than 
 
 ## User control and provider failure modes
 
-`/forget ID` marks an active fact and directly linked / normalized-content-matching episodes inactive. Matching question text is cleared, including a question associated with another fact. It also clears recent dialogue, cached answer bodies, pending candidates and journals so those secondary copies cannot revive the fact. Receipt identities become revoked tombstones, as described above. Metrics are refreshed; past developmental stage and personality do not regress. Inactive rows, input digests and previous backups remain on disk: **this is recall suppression, not secure erasure**. Other independent facts are not a semantic dependency graph, and re-teaching can intentionally save the same information again.
+`/forget ID` marks the selected fact (active or superseded) and directly linked / normalized-content-matching episodes inactive. Matching question text is cleared, including a question associated with another fact. It also clears recent dialogue, cached answer bodies, pending candidates and journals so those secondary copies cannot revive the fact. Receipt identities become revoked tombstones, as described above. Metrics are refreshed; past developmental stage and personality do not regress. Inactive rows, input digests and previous backups remain on disk: **this is recall suppression, not secure erasure**. Other independent facts are not a semantic dependency graph, and re-teaching can intentionally save the same information again.
+
+Emotion episodes now store only tone and simulated state. Legacy emotion episodes
+embedded raw input truncated to 180 characters with the marker `用户说：`, without
+fact provenance. Matching a complete long fact cannot find that partial copy.
+On an explicit successful forget, all active emotion episodes bearing the marker
+are conservatively retired, including unrelated excerpts. Other structured events
+and state-only emotion records are preserved. This cleanup shares the existing
+forget transaction, runs only after finding the ID, and requires no migration.
+See [historical memory controls](MEMORY_CONTROLS.md).
 
 `/export` writes a new human-readable JSON under `data-dir/exports/` using an explicit field allowlist and a consistent read transaction. It excludes configuration, keys, environment files, raw dialogue, unconfirmed candidates and inactive facts. All active facts, important episodes, state and journals may contain personal information. It refuses to overwrite files. `/reset` is not implemented; an independent `--data-dir` safely creates another baby.
 
