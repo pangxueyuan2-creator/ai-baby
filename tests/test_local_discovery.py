@@ -288,15 +288,34 @@ def test_discovery_redirect_never_connects_to_another_listener(status):
         assert destination_response["connections"] == 0
 
 
-def test_discovery_refused_loopback_connection_has_transport_category():
-    # Keep the port reserved without listening, so another process cannot claim the fixture.
+def test_unavailable_loopback_port_fails_with_a_bounded_safe_error():
+    # A reserved non-listening port is unavailable, but the kernel may drop rather than
+    # reject its connect attempts. A total deadline is valid in that case (seen on macOS).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
         reserved.bind(("127.0.0.1", 0))
         url = f"http://127.0.0.1:{reserved.getsockname()[1]}"
+        started = time.monotonic()
         with pytest.raises(ProviderError) as error:
             discover_models(url, timeout=3)
-        assert error.value.category == "transport"
+        assert error.value.category in {"transport", "timeout"}
+        assert time.monotonic() - started < 4
         assert url not in str(error.value)
+
+
+def test_explicit_connection_refusal_has_transport_category(monkeypatch):
+    """Test classification independently of the host's TCP rejection timing."""
+    attempts = []
+
+    def refuse(sock, address):
+        attempts.append(address)
+        raise ConnectionRefusedError("synthetic connection refusal")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    with pytest.raises(ProviderError) as error:
+        discover_models("http://127.0.0.1:11434", timeout=3)
+    assert error.value.category == "transport"
+    assert attempts == [("127.0.0.1", 11434)]
+    assert "synthetic" not in str(error.value)
 
 
 def test_discovery_stalled_headers_has_timeout_category():
