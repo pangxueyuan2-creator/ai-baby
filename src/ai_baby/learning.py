@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from .candidates import MemoryCandidate, assertion_clauses, extract_extended
 from .memory import MemoryStore
+from .models import parse_memory_id
 
 
 @dataclass
@@ -29,16 +30,17 @@ class Learner:
         result = LearningResult()
         confirmation = re.fullmatch(r"确认记忆\s+(\d+)", text.strip())
         if confirmation:
+            candidate_id = parse_memory_id(confirmation[1])
             row = self.memory.db.execute(
                 "SELECT kind,subject,predicate,value FROM candidates WHERE id=?",
-                (int(confirmation[1]),),
+                (candidate_id,),
             ).fetchone()
             if row is None:
                 result.acknowledgements.append("这条候选不存在或已经处理")
             else:
                 candidate = MemoryCandidate(**dict(row)).validated()
                 self._save(candidate, result)
-                self.memory.db.execute("DELETE FROM candidates WHERE id=?", (int(confirmation[1]),))
+                self.memory.db.execute("DELETE FROM candidates WHERE id=?", (candidate_id,))
             return result
         for sentence in assertion_clauses(text):
             extended = extract_extended(sentence)
