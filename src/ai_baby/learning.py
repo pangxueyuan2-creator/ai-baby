@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass, field
 
-from .candidates import MemoryCandidate, assertion_clauses, extract_extended
+from .candidates import MemoryCandidate, assertion_clauses, extract_candidates
 from .memory import MemoryStore
 from .models import parse_memory_id
 
@@ -15,6 +15,53 @@ class LearningResult:
     pending: list[dict] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
     fact_ids: list[int] = field(default_factory=list)
+
+
+_PLACE_CHILDREN = {
+    "浙江": (
+        "杭州",
+        "宁波",
+        "温州",
+        "嘉兴",
+        "绍兴",
+        "金华",
+        "台州",
+        "丽水",
+        "衢州",
+        "舟山",
+        "湖州",
+        "余杭",
+        "西湖",
+        "萧山",
+        "滨江",
+        "临平",
+    ),
+    "杭州": ("余杭", "西湖", "萧山", "滨江", "拱墅", "上城", "临平"),
+}
+
+
+def _place_tokens(value: str) -> set[str]:
+    text = MemoryStore.normalize(value)
+    found = {text} if text else set()
+    for parent, children in _PLACE_CHILDREN.items():
+        if parent in text:
+            found.add(parent)
+        found.update(child for child in children if child in text)
+    return found
+
+
+def is_coarser_place(new: str, old: str) -> bool:
+    """True when the new residence only names a broader region already implied by old."""
+    incoming = MemoryStore.normalize(new)
+    previous = MemoryStore.normalize(old)
+    if not incoming or incoming == previous:
+        return False
+    if previous.startswith(incoming) and len(incoming) < len(previous):
+        return True
+    new_tokens = _place_tokens(new)
+    old_tokens = _place_tokens(old)
+    ancestors = set(_PLACE_CHILDREN)
+    return bool(old_tokens - ancestors) and new_tokens <= ancestors
 
 
 class Learner:
@@ -43,20 +90,21 @@ class Learner:
                 self.memory.db.execute("DELETE FROM candidates WHERE id=?", (candidate_id,))
             return result
         for sentence in assertion_clauses(text):
-            extended = extract_extended(sentence)
-            if extended is not None:
-                if extended.ambiguous:
-                    existing = self.memory.db.execute(
-                        "SELECT id FROM candidates WHERE kind=? AND subject=? AND predicate=? AND value=?",
-                        (extended.kind, extended.subject, extended.predicate, extended.value),
-                    ).fetchone()
-                    candidate_id = existing[0] if existing else self._propose(extended)
-                    self.memory.db.execute(
-                        "DELETE FROM candidates WHERE id NOT IN (SELECT id FROM candidates ORDER BY id DESC LIMIT 3)"
-                    )
-                    result.pending.append({"id": candidate_id, "value": extended.value})
-                else:
-                    self._save(extended, result)
+            extracted = extract_candidates(sentence)
+            if extracted:
+                for extended in extracted:
+                    if extended.ambiguous:
+                        existing = self.memory.db.execute(
+                            "SELECT id FROM candidates WHERE kind=? AND subject=? AND predicate=? AND value=?",
+                            (extended.kind, extended.subject, extended.predicate, extended.value),
+                        ).fetchone()
+                        candidate_id = existing[0] if existing else self._propose(extended)
+                        self.memory.db.execute(
+                            "DELETE FROM candidates WHERE id NOT IN (SELECT id FROM candidates ORDER BY id DESC LIMIT 3)"
+                        )
+                        result.pending.append({"id": candidate_id, "value": extended.value})
+                    else:
+                        self._save(extended, result)
                 continue
             pref = re.fullmatch(r"我(不喜欢|讨厌|喜欢)(.+)", sentence)
             personal = re.fullmatch(r"我(住在|的生日是|的职业是)(.+)", sentence)
@@ -125,11 +173,17 @@ class Learner:
         previous = None
         if candidate.kind == "personal":
             row = self.memory.db.execute(
-                "SELECT value FROM facts WHERE kind=? AND subject=? AND predicate=? AND active=1",
+                "SELECT id,value FROM facts WHERE kind=? AND subject=? AND predicate=? AND active=1",
                 fields[:3],
             ).fetchone()
-            if row and self.memory.normalize(row[0]) != self.memory.normalize(candidate.value):
-                previous = row[0]
+            if row and self.memory.normalize(row["value"]) != self.memory.normalize(candidate.value):
+                previous = row["value"]
+                if candidate.predicate == "居住地" and is_coarser_place(candidate.value, previous):
+                    result.acknowledgements.append(
+                        f"还是记着更具体的{previous}（{candidate.value}范围更大）"
+                    )
+                    result.fact_ids.append(row["id"])
+                    return
         changed = self.memory.learn(*fields)
         if changed:
             result.learned += 1
