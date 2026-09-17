@@ -8,10 +8,14 @@ It is a portability/bootstrap path, not a forensic database restore. For byte-pr
 
 ```bash
 ai-baby-export --data-dir ~/.ai-baby --output ./baby-portable.json --pretty
-ai-baby-import ./baby-portable.json --check
-ai-baby-import ./baby-portable.json --data-dir ./imported-baby
+ai-baby-import ./baby-portable.json --check --require-checksum
+ai-baby-import ./baby-portable.json --data-dir ./imported-baby --require-checksum
 ai-baby-doctor --data-dir ./imported-baby
 ```
+
+A new `ai-baby-export` also creates `baby-portable.json.sha256`. Keep the JSON and sidecar together when copying
+the export. The importer verifies a sidecar automatically whenever one is present; `--require-checksum` also
+rejects old or incomplete transfers where the sidecar is missing.
 
 The importer restores the user-visible active profile, baby name, structured state, facts and episodes. It
 rebuilds SQLite indexes and internal IDs using the current schema rather than copying hidden implementation
@@ -22,22 +26,37 @@ bookkeeping from the export.
 Use `--check` before a migration, in CI, or whenever an export arrives from another machine:
 
 ```bash
-ai-baby-import ./baby-portable.json --check --json
+ai-baby-import ./baby-portable.json --check --require-checksum --json
 ```
 
-Preflight runs the same structural and semantic validation as a real import, including format/version checks,
-privacy-option checks, field validation, duplicate IDs, numeric ranges and episode-to-fact references. A
-successful JSON result reports the number of facts and episodes plus whether a profile is present.
+Preflight runs the same structural and semantic validation as a real import, including checksum verification
+when present, format/version checks, privacy-option checks, field validation, duplicate IDs, numeric ranges and
+episode-to-fact references. A successful JSON result reports the number of facts and episodes plus whether a
+profile is present.
+
+The importer reads at most 20 MiB of export bytes, verifies the checksum against those exact bytes, and parses
+that same in-memory snapshot. This avoids a verify-then-reopen gap where a file could otherwise change between
+integrity checking and JSON parsing.
 
 `--check` is deliberately read-only with respect to AI Baby storage: it does not create the default
 `AI_BABY_DATA_DIR`, does not create SQLite files, does not migrate an existing database, does not load provider
 configuration and does not make network requests. This makes it suitable for release gates and automated
 migration pipelines.
 
+## Checksum compatibility and limits
+
+Exports created before checksum sidecars were introduced remain accepted when `--require-checksum` is omitted.
+This keeps existing portable exports usable. However, any sidecar that is present must be well formed and match
+the JSON; a malformed or mismatched checksum is never ignored.
+
+SHA-256 detects accidental corruption and untrusted modification when the expected sidecar is transferred
+through a trusted channel. It is not a digital signature or proof of authorship. Do not treat a matching digest
+as evidence that an export came from a particular person or machine.
+
 ## Non-destructive guarantees
 
-- The entire JSON document, including cross-record references, is parsed and validated before a destination
-  directory or database is created.
+- Checksum verification and the entire JSON document validation, including cross-record references, happen
+  before a destination directory or database is created.
 - `--data-dir` must not already contain `baby.sqlite3`; existing babies are never overwritten.
 - If database reconstruction fails, the newly-created database plus SQLite WAL/SHM files are removed.
 - The completed database is checked with the same read-only doctor used elsewhere in the project.
