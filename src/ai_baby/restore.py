@@ -72,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="验证 AI Baby SQLite 备份并恢复到一个不含 baby.sqlite3 的数据目录"
     )
-    parser.add_argument("backup", type=Path, help="由 /backup 或 ai-baby-backup 创建的 .sqlite3 文件")
+    parser.add_argument(
+        "backup", type=Path, help="由 /backup 或 ai-baby-backup 创建的 .sqlite3 文件"
+    )
     parser.add_argument(
         "--data-dir",
         type=Path,
