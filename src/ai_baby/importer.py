@@ -101,8 +101,17 @@ def _validate_state(key: str, value: Any) -> Any:
     return cls(**data)
 
 
+def _validate_portable_references(portable: dict[str, Any]) -> None:
+    """Validate cross-record references before any destination filesystem mutation."""
+    fact_ids = {fact["id"] for fact in portable["facts"]}
+    for episode in portable["episodes"]:
+        fact_id = episode["fact_id"]
+        if fact_id is not None and fact_id not in fact_ids:
+            raise ValueError("episode 引用了未包含在默认隐私导出中的 fact。")
+
+
 def load_privacy_export(source: Path) -> dict[str, Any]:
-    """Read and validate a portable default privacy export without creating a database."""
+    """Read and fully validate a portable default privacy export without creating a database."""
     source = source.expanduser()
     if not source.is_file():
         raise ValueError("隐私导出文件不存在或不是普通文件。")
@@ -201,12 +210,28 @@ def load_privacy_export(source: Path) -> dict[str, Any]:
             raise ValueError("隐私导出包含无效 episode。") from exc
         episodes.append(episode)
 
-    return {
+    portable = {
         "profile": profile,
         "baby_name": baby_name,
         "states": states,
         "facts": facts,
         "episodes": episodes,
+    }
+    _validate_portable_references(portable)
+    return portable
+
+
+def preflight_privacy_export(source: Path) -> dict[str, Any]:
+    """Validate a portable export completely without creating a data directory or database."""
+    portable = load_privacy_export(source)
+    return {
+        "status": "ok",
+        "mode": "check",
+        "format": FORMAT_NAME,
+        "format_version": FORMAT_VERSION,
+        "facts": len(portable["facts"]),
+        "episodes": len(portable["episodes"]),
+        "profile_imported": portable["profile"] is not None,
     }
 
 
@@ -302,11 +327,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("source", type=Path, help="由 ai-baby-export 默认模式生成的 JSON 文件")
     parser.add_argument("--data-dir", type=Path, help="新的宝宝数据目录；绝不覆盖已有 baby.sqlite3")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="只做完整导入预检，不创建数据目录或 SQLite 数据库",
+    )
     parser.add_argument("--json", action="store_true", help="输出稳定 JSON，便于脚本和 CI 使用")
     args = parser.parse_args(argv)
 
     try:
-        result = import_privacy_export(args.source, args.data_dir or _default_data_dir())
+        if args.check:
+            result = preflight_privacy_export(args.source)
+        else:
+            result = import_privacy_export(args.source, args.data_dir or _default_data_dir())
     except (MemoryError, ValueError) as exc:
         message = str(exc)
         if args.json:
@@ -324,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    elif args.check:
+        print("隐私导出预检通过；未创建或修改任何 AI Baby 数据库。")
+        print(f"facts={result['facts']} episodes={result['episodes']}")
     else:
         print("隐私导入完成：" + safe_output(str(result["database"])))
         print(f"facts={result['facts']} episodes={result['episodes']}")

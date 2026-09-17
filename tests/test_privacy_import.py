@@ -9,7 +9,7 @@ import pytest
 
 from ai_baby import importer
 from ai_baby.export import build_privacy_export, write_privacy_export
-from ai_baby.importer import EXIT_OK, import_privacy_export
+from ai_baby.importer import EXIT_INVALID, EXIT_OK, import_privacy_export, preflight_privacy_export
 from ai_baby.memory import MemoryStore
 from ai_baby.models import Profile, Relationship
 
@@ -134,7 +134,7 @@ def test_import_race_never_deletes_a_destination_created_by_someone_else(tmp_pat
     assert target.read_bytes() == sentinel
 
 
-def test_broken_episode_fact_reference_rolls_back_and_removes_new_database(tmp_path):
+def test_broken_episode_fact_reference_is_rejected_before_destination_creation(tmp_path):
     source = make_export(tmp_path)
     payload = json.loads(source.read_text(encoding="utf-8"))
     assert payload["episodes"][0]["fact_id"] is not None
@@ -145,9 +145,102 @@ def test_broken_episode_fact_reference_rolls_back_and_removes_new_database(tmp_p
     with pytest.raises(ValueError, match="episode 引用了"):
         import_privacy_export(source, target_dir)
 
-    assert not (target_dir / "baby.sqlite3").exists()
-    assert not (target_dir / "baby.sqlite3-wal").exists()
-    assert not (target_dir / "baby.sqlite3-shm").exists()
+    assert not target_dir.exists()
+
+
+def test_preflight_reports_portable_counts_and_rejects_broken_references(tmp_path):
+    source = make_export(tmp_path)
+
+    result = preflight_privacy_export(source)
+
+    assert result == {
+        "status": "ok",
+        "mode": "check",
+        "format": "ai-baby-privacy-export",
+        "format_version": 1,
+        "facts": 2,
+        "episodes": 1,
+        "profile_imported": True,
+    }
+
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["episodes"][0]["fact_id"] = 999999
+    source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="episode 引用了"):
+        preflight_privacy_export(source)
+
+
+def test_import_check_cli_is_read_only_and_ignores_provider_configuration(tmp_path):
+    source = make_export(tmp_path)
+    untouched_data_dir = tmp_path / "must-not-be-created"
+    env = os.environ.copy()
+    env.update(
+        PYTHONPATH=str(ROOT / "src"),
+        PYTHONIOENCODING="utf-8",
+        AI_BABY_DATA_DIR=str(untouched_data_dir),
+        AI_BABY_PROVIDER="openai-compatible",
+        AI_BABY_BASE_URL="http://unsafe.example.invalid/v1",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ai_baby.importer",
+            str(source),
+            "--check",
+            "--json",
+        ],
+        encoding="utf-8",
+        capture_output=True,
+        env=env,
+        timeout=20,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == EXIT_OK, result.stderr
+    status_payload = json.loads(result.stdout)
+    assert status_payload["status"] == "ok"
+    assert status_payload["mode"] == "check"
+    assert status_payload["facts"] == 2
+    assert status_payload["episodes"] == 1
+    assert not untouched_data_dir.exists()
+
+
+def test_import_check_cli_rejects_broken_reference_without_creating_default_data_dir(tmp_path):
+    source = make_export(tmp_path)
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["episodes"][0]["fact_id"] = 999999
+    source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    untouched_data_dir = tmp_path / "must-not-be-created"
+    env = os.environ.copy()
+    env.update(
+        PYTHONPATH=str(ROOT / "src"),
+        PYTHONIOENCODING="utf-8",
+        AI_BABY_DATA_DIR=str(untouched_data_dir),
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ai_baby.importer",
+            str(source),
+            "--check",
+            "--json",
+        ],
+        encoding="utf-8",
+        capture_output=True,
+        env=env,
+        timeout=20,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == EXIT_INVALID, result.stderr
+    status_payload = json.loads(result.stdout)
+    assert status_payload["status"] == "error"
+    assert "episode 引用了" in status_payload["message"]
+    assert not untouched_data_dir.exists()
 
 
 def test_import_cli_ignores_unrelated_provider_configuration(tmp_path):
