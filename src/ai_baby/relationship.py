@@ -15,7 +15,7 @@ def _direct_clauses(text: str) -> list[str]:
         for clause in clauses
         if not any(marker in clause for marker in ("?", "？", "吗", "如果", "假如", "假设", "是否"))
         and not re.search(
-            r'''(?:他|她|别人|有人)(?:对我)?说|(?:不要|别|没有|没|不曾|不是|不许|并非|从没)(?:再)?说|台词|例句|[“”‘’"'「」]''',
+            r"""(?:他|她|别人|有人)(?:对我)?说|(?:不要|别|没有|没|不曾|不是|不许|并非|从没)(?:再)?说|台词|例句|[“”‘’"'「」]""",
             clause,
         )
     ]
