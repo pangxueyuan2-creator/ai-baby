@@ -85,8 +85,7 @@ def _validate_state(key: str, value: Any) -> Any:
     if key in {"relationship", "personality"} and any(item > 100 for item in data.values()):
         raise ValueError(f"隐私导出中的 {key} 数值超出范围。")
     if key == "emotion" and (
-        data["label"]
-        not in {"calm", "happy", "curious", "sad", "playful", "nervous", "annoyed"}
+        data["label"] not in {"calm", "happy", "curious", "sad", "playful", "nervous", "annoyed"}
         or data["intensity"] > 1
     ):
         raise ValueError("隐私导出中的 emotion 状态无效。")
