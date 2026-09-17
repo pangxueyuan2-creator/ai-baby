@@ -89,9 +89,8 @@ _ENGLISH_FACT_QUALIFIER = re.compile(
     r"uncertain)\b",
     re.IGNORECASE,
 )
-_ENGLISH_ASSERTION_START = re.compile(
-    r"^(?:i\s+(?:really\s+)?(?:like|dislike|do\s+not|don't)\b|"
-    r"i\s+live\s+in\b|my\s+birthday\s+is\b|i\s+work\s+as\b|"
+_ENGLISH_FACT_START = re.compile(
+    r"^(?:i\s+live\s+in\b|my\s+birthday\s+is\b|i\s+work\s+as\b|"
     r"my\s+(?:job|profession)\s+is\b|"
     r"[^.;?!]+?\s+is\s+my\s+(?:friend|classmate|teacher|coworker|colleague|family\s+member)\b)",
     re.IGNORECASE,
@@ -159,13 +158,14 @@ def _unsupported_still(sentence: str) -> bool:
 
 
 def _split_supported_english_periods(segment: str) -> list[str]:
-    """Split ASCII full stops only between independently supported English assertions.
+    """Split periods only between independently supported English profile/relation facts.
 
     A blind ``. `` split would corrupt values such as ``Dr. Smith`` or ``St. Louis``
     and could detach a qualifier from an otherwise safe-looking first clause. Split
-    only when the left side is already a complete supported assertion and the right
-    side starts like another supported assertion. Unsupported tails stay attached so
-    the existing conservative qualifier checks can reject the whole fragment.
+    only when the left side is already a complete supported fact and the right side
+    starts like another supported fact. Preference sentences deliberately keep the
+    older single-clause safety rule. Unsupported tails also stay attached so existing
+    conservative qualifier checks can reject the whole fragment.
     """
     pending = segment.strip()
     clauses: list[str] = []
@@ -174,8 +174,8 @@ def _split_supported_english_periods(segment: str) -> list[str]:
         for match in re.finditer(r"\.\s+", pending):
             left = pending[: match.start()].strip()
             right = pending[match.end() :].strip()
-            left_supported = _english_preference(left) or _english_simple_fact(left)
-            if left_supported is not None and right and _ENGLISH_ASSERTION_START.match(right):
+            left_supported = _english_simple_fact(left)
+            if left_supported is not None and right and _ENGLISH_FACT_START.match(right):
                 boundary = (left, right)
                 break
         if boundary is None:
