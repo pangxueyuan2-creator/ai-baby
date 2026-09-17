@@ -56,16 +56,18 @@ def classify(text: str, state: Relationship) -> str:
 
 
 def update(state: Relationship, tone: str) -> Relationship:
-    """Bounded, diminishing changes; even repeated praise cannot quickly max trust."""
+    """Bounded, diminishing changes; passive chatter cannot farm trust or closeness."""
     changes = {
         "gentle": (0.30, 0.16, 0.20, 0.18, 0.08),
         "playful": (0.12, 0.10, 0.20, 0.12, 0.25),
         "teasing": (0.05, 0.08, 0.20, 0.10, 0.20),
         "hostile": (-0.35, -0.10, 0.10, -0.20, -0.15),
-        "ambiguous": (0.0, 0.0, 0.15, 0.0, 0.0),
-        "distress": (0.04, 0.05, 0.15, 0.05, 0.0),
-        "neutral": (0.05, 0.04, 0.20, 0.04, 0.01),
-        "reserved": (0.0, 0.01, 0.15, 0.01, 0.0),
+        "ambiguous": (0.0, 0.0, 0.08, 0.0, 0.0),
+        "distress": (0.04, 0.05, 0.10, 0.05, 0.0),
+        # Neutral conversation may very slowly increase familiarity, but it must not create
+        # trust/attachment/closeness merely by keeping the process busy.
+        "neutral": (0.0, 0.0, 0.02, 0.0, 0.0),
+        "reserved": (0.0, 0.01, 0.08, 0.01, 0.0),
     }
     result = replace(state)
     for name, delta in zip(
