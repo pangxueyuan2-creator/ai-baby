@@ -8,6 +8,7 @@ It is a portability/bootstrap path, not a forensic database restore. For byte-pr
 
 ```bash
 ai-baby-export --data-dir ~/.ai-baby --output ./baby-portable.json --pretty
+ai-baby-import ./baby-portable.json --check
 ai-baby-import ./baby-portable.json --data-dir ./imported-baby
 ai-baby-doctor --data-dir ./imported-baby
 ```
@@ -16,12 +17,29 @@ The importer restores the user-visible active profile, baby name, structured sta
 rebuilds SQLite indexes and internal IDs using the current schema rather than copying hidden implementation
 bookkeeping from the export.
 
+## Preflight / dry validation
+
+Use `--check` before a migration, in CI, or whenever an export arrives from another machine:
+
+```bash
+ai-baby-import ./baby-portable.json --check --json
+```
+
+Preflight runs the same structural and semantic validation as a real import, including format/version checks,
+privacy-option checks, field validation, duplicate IDs, numeric ranges and episode-to-fact references. A
+successful JSON result reports the number of facts and episodes plus whether a profile is present.
+
+`--check` is deliberately read-only with respect to AI Baby storage: it does not create the default
+`AI_BABY_DATA_DIR`, does not create SQLite files, does not migrate an existing database, does not load provider
+configuration and does not make network requests. This makes it suitable for release gates and automated
+migration pipelines.
+
 ## Non-destructive guarantees
 
-- The entire JSON document is parsed and validated before a destination database is created.
+- The entire JSON document, including cross-record references, is parsed and validated before a destination
+  directory or database is created.
 - `--data-dir` must not already contain `baby.sqlite3`; existing babies are never overwritten.
-- If validation or database reconstruction fails, the newly-created database plus SQLite WAL/SHM files are
-  removed.
+- If database reconstruction fails, the newly-created database plus SQLite WAL/SHM files are removed.
 - The completed database is checked with the same read-only doctor used elsewhere in the project.
 - The command does not load LLM/provider configuration, make network requests, or require an API key.
 - On POSIX systems the new SQLite file is owner-only (`0600`) through the normal storage creation path.
