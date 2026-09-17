@@ -41,8 +41,8 @@ def is_experience_query(text: str) -> bool:
     compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text)
     asked = any(word in compact for word in ("什么", "吗", "呢", "记得", "看了", "做了", "发生"))
     recent = any(word in compact for word in ("昨晚", "昨天", "今晚", "今天晚上"))
-    return recent and asked or any(
-        word in compact for word in ("看了什么", "做了什么", "发生了什么")
+    return (
+        recent and asked or any(word in compact for word in ("看了什么", "做了什么", "发生了什么"))
     )
 
 
@@ -228,7 +228,9 @@ def build_context(
         # Queries about preferences need category retrieval even without object keywords.
         folded = text.casefold()
         if any(w in folded for w in ("喜欢什么", "喜好", "讨厌什么", "what do i like")):
-            predicate = "dislikes" if any(w in folded for w in ("不喜欢", "讨厌", "not like")) else "likes"
+            predicate = (
+                "dislikes" if any(w in folded for w in ("不喜欢", "讨厌", "not like")) else "likes"
+            )
             facts = memory.facts(predicate, limit=8)
     if is_recall_query(text):
         topics = recall_topics(text)

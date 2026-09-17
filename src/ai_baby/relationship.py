@@ -8,7 +8,7 @@ from .models import Relationship
 
 def _direct_clauses(text: str) -> list[str]:
     """Conservatively exclude quotations, hypotheticals and reported utterances."""
-    text = re.sub(r'[“”‘’「」\"]+', " ", text)
+    text = re.sub(r"[“”‘’「」\"]+", " ", text)
     clauses = re.findall(r"[^，,。！？!?；;\n]+[，,。！？!?；;\n]?", text)
     return [
         clause
