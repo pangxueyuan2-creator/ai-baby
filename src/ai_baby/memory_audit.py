@@ -59,9 +59,7 @@ def _fixture_rows(path: str) -> list[tuple[int, dict[str, object]]]:
             if not isinstance(text, str) or not text:
                 raise ValueError(f"line {line_number}: text must be a non-empty string")
             if expectation not in _EXPECTATIONS:
-                raise ValueError(
-                    f"line {line_number}: expect must be 'memory' or 'no-memory'"
-                )
+                raise ValueError(f"line {line_number}: expect must be 'memory' or 'no-memory'")
             if case_id is not None and (not isinstance(case_id, str) or not case_id):
                 raise ValueError(f"line {line_number}: id must be a non-empty string when supplied")
             rows.append((line_number, payload))
@@ -108,9 +106,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cases",
         metavar="PATH",
-        help=(
-            "Audit JSONL cases with text and expect fields; exit 1 if any expectation fails."
-        ),
+        help=("Audit JSONL cases with text and expect fields; exit 1 if any expectation fails."),
     )
     expectation = parser.add_mutually_exclusive_group()
     expectation.add_argument(
