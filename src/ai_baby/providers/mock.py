@@ -124,6 +124,20 @@ class MockProvider(BaseLLMProvider):
                 "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
             )
 
+        # A vague "X呢？" may safely surface the exact matching stored item. This is narrower
+        # than the old facts[0] fallback: questions about an unknown property of X still admit
+        # that the answer is unknown instead of presenting an unrelated relationship as evidence.
+        compact = text.strip().strip("。！？!? ")
+        exact_mentions = [
+            fact
+            for fact in context.facts
+            if compact in {fact.value + "呢", fact.subject + "呢"}
+        ]
+        if exact_mentions:
+            fact = exact_mentions[0]
+            origin = "你教过我" if fact.kind in {"world", "knowledge"} else "你告诉过我"
+            return f"{origin}：{_fact_sentence(fact)}。"
+
         if context.tone in {"teasing", "playful", "hostile", "ambiguous", "distress", "gentle"}:
             return {
                 "teasing": f"又逗我，{address} 😼 我也会慢慢学会的。",
