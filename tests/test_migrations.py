@@ -19,6 +19,7 @@ def create_v1(path):
     db.execute(
         "INSERT INTO facts(kind,subject,predicate,value,normalized) VALUES('preference','用户','likes','草莓','草莓')"
     )
+    db.execute("INSERT INTO episodes(kind,summary) VALUES('learning','认识草莓')")
     db.execute("INSERT INTO episodes(kind,summary) VALUES('important','妈妈第一次教我星星')")
     for key, state in (
         ("growth", Growth(interactions=80, stage="child")),
@@ -42,6 +43,10 @@ def test_v1_migration_preserves_every_existing_layer(tmp_path):
         assert memory.profile().address == "妈妈"
         assert memory.facts()[0].value == "草莓"
         assert "星星" in memory.episodes()[0]["summary"]
+        assert (
+            memory.db.execute("SELECT importance FROM episodes WHERE kind='learning'").fetchone()[0]
+            == 0.4
+        )
         assert memory.load_state("growth", Growth).stage == "child"
         assert memory.load_state("growth", Growth).interactions == 80
         assert memory.load_state("relationship", Relationship).trust == 65

@@ -60,6 +60,8 @@ Backup failure prevents migration. Migration failure rolls back both schema and 
 
 `MIGRATIONS` is an ordered registry. Future changes must add a new migration and a frozen previous-version fixture, not edit an already released migration. Tests create actual v1 files from `tests/fixtures/v1.sql`, copied from commit `c4871b8`; no user database is shipped.
 
+Compatibility note: the importance column uses an integer SQL default during `ALTER TABLE`, followed by an explicit `0.4` backfill. This retains NOT NULL and range checks while avoiding [older SQLite's floating-default integrity-check bug](https://sqlite.org/forum/forumpost/ee4f6fa5ab), exposed by the Linux/macOS migration CI. Databases that already migrated successfully remain readable without another upgrade.
+
 ## Memory and retrieval
 
 The existing layers remain separate. Additional v2 tables:

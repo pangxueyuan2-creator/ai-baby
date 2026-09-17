@@ -26,7 +26,10 @@ def upgrade(db: sqlite3.Connection) -> None:
     statements = [
         "ALTER TABLE facts ADD COLUMN novelty TEXT NOT NULL DEFAULT ''",
         "CREATE INDEX facts_novelty ON facts(active,kind,novelty)",
-        "ALTER TABLE episodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.4 CHECK(importance BETWEEN 0 AND 1)",
+        # Older SQLite builds falsely reject floating NOT NULL defaults on populated tables.
+        # Keep both constraints: add an integer default, then materialize the intended values.
+        "ALTER TABLE episodes ADD COLUMN importance REAL NOT NULL DEFAULT 0 CHECK(importance BETWEEN 0 AND 1)",
+        "UPDATE episodes SET importance=0.4",
         "ALTER TABLE episodes ADD COLUMN active INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE episodes ADD COLUMN fact_id INTEGER REFERENCES facts(id)",
         "CREATE TABLE episode_tokens(token TEXT NOT NULL, episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE, PRIMARY KEY(token,episode_id))",
