@@ -61,6 +61,25 @@ def test_companion_questions_do_not_demand_the_teaching_syntax(baby):
     assert "照顾" in about
 
 
+def test_residence_overwrite_says_what_changed(baby):
+    first = baby.chat("我住在浙江杭州。").text
+    assert "浙江杭州" in first
+    changed = baby.chat("我家在余杭。").text
+    assert "余杭" in changed
+    assert "之前是浙江杭州" in changed
+    assert "余杭" in baby.chat("我住在哪里？").text
+
+
+def test_offline_notice_is_only_in_the_startup_greeting(baby):
+    first = baby.greeting()
+    second = baby.greeting()
+    chat = baby.chat("你好").text
+    assert "离线模式" in first
+    assert "离线模式" not in second
+    assert "当前为基础离线模式" not in first + second + chat
+    assert "离线模式" not in chat
+
+
 def test_negative_preference_question_is_not_routed_as_likes():
     assert fact_query_route("我不喜欢什么？") == ("preference", "dislikes")
     assert fact_query_route("我喜欢什么？") == ("preference", "likes")
