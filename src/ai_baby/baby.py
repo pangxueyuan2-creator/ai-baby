@@ -48,7 +48,7 @@ class Baby:
         self.provider = provider or MockProvider()
         self.clock = clock
         self.last_tick = clock()
-        # Validate persisted state at startup instead of crashing mid-conversation.
+        self._offline_notice_emitted = False
         self.memory.load_state("growth", Growth)
         self.memory.load_state("relationship", Relationship)
         self.memory.load_state("emotion", Emotion)
@@ -71,11 +71,14 @@ class Baby:
         profile = self.memory.profile()
         if profile is None:
             raise ValueError("请先完成出生流程。")
-        return f"{profile.address}，你回来啦。我是{self.name}，我记得你叫{profile.name}。"
+        text = f"{profile.address}，你回来啦。我是{self.name}，我记得你叫{profile.name}。"
+        if isinstance(self.provider, MockProvider) and not self._offline_notice_emitted:
+            self._offline_notice_emitted = True
+            text += " 这次启动是离线模式，之后不会每句重复。"
+        return text
 
     @property
     def name(self) -> str:
-        """The persisted display name, also validated when read from an older store."""
         return clean_text(self.memory.setting("baby_name", "AI 宝宝"), 80)
 
     def change_profile(self, name: str | None = None, address: str | None = None) -> Profile:
@@ -93,7 +96,6 @@ class Baby:
         return profile
 
     def _advance(self, text: str, elapsed: float) -> Context:
-        """Deterministic local transition, used for preview and commit, never networking."""
         profile = self.memory.profile()
         if profile is None:
             raise ValueError("请先完成出生流程。")
@@ -118,8 +120,6 @@ class Baby:
         relation = relationship.update(relation, tone)
         new_emotion = emotions.update(emotion, tone, learning.learned > 0)
         if tone in {"hostile", "distress", "gentle"} and new_emotion.label != emotion.label:
-            # Unlinked raw excerpts can outlive forgotten facts after truncation.
-            # Keep only software-state metadata; learning records have fact provenance.
             self.memory.episode(
                 "emotion",
                 f"互动情境：{tone}；模拟状态变为 {new_emotion.label}。",
@@ -151,7 +151,6 @@ class Baby:
         return Reply(row["answer"], row["warning"])
 
     def chat(self, text: str, *, turn_id: str | None = None) -> Reply:
-        """Preview / generate / compare-and-commit. Never hold a transaction over I/O."""
         text = clean_text(text)
         turn_id = clean_text(turn_id or uuid.uuid4().hex, 100)
         digest = hashlib.sha256(text.encode()).hexdigest()
@@ -162,7 +161,6 @@ class Baby:
                 return existing
             revision = self.memory.revision()
             context = self._advance(text, elapsed)
-        # The preview was rolled back, including facts, metrics, candidates and revision.
         warning = None
         try:
             answer = safe_output(self.provider.generate(context)).strip()

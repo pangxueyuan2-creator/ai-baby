@@ -40,12 +40,19 @@ def _episode_sentence(summary: str) -> str:
 
 def _learning_reply(context: Context) -> str | None:
     """Make successful teaching feel like a growing character, not a database dump."""
+    replacements = [
+        ack
+        for ack in context.learning.acknowledgements
+        if ack.startswith("我把") and "改成" in ack
+    ]
+    address = context.profile.address
+    if replacements:
+        return f"{address}，{replacements[0]}。"
     learned_ids = set(context.learning.fact_ids)
     learned = [fact for fact in context.facts if fact.id in learned_ids]
     if not learned:
         return None
     summary = "；".join(_fact_sentence(fact) for fact in learned[:4])
-    address = context.profile.address
     stage = context.growth.stage
     if stage == "newborn":
         return f"{address}，我先记住啦：{summary}。"
