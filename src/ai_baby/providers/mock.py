@@ -8,7 +8,7 @@ from .base import BaseLLMProvider
 def _fact_sentence(fact: Fact) -> str:
     """Render stored triples as normal Chinese instead of exposing internal predicates."""
     if fact.kind == "preference":
-        return f"你{'\u559c\u6b22' if fact.predicate == 'likes' else '\u4e0d\u559c\u6b22'}{fact.value}"
+        return f"你{'喜欢' if fact.predicate == 'likes' else '不喜欢'}{fact.value}"
     if fact.kind == "personal":
         return {
             "居住地": f"你住在{fact.value}",
@@ -65,6 +65,8 @@ class MockProvider(BaseLLMProvider):
             ]
             return f"你保存的性别选择是“{gender}”，我称呼你为{address}。"
 
+        # Explicit memory questions take priority over tone. "谢谢，我住在哪里？" should
+        # answer the saved profile fact instead of being swallowed by the gentle-tone policy.
         route = fact_query_route(text)
         if route is not None:
             kind, predicate = route
@@ -76,15 +78,15 @@ class MockProvider(BaseLLMProvider):
                     return f"你告诉过我，你的生日是{values[0]}。"
                 if (kind, predicate) == ("personal", "职业"):
                     return f"你告诉过我，你的职业是{values[0]}。"
-                if (kind, predicate) == ("relation", "朋友"):
-                    return "我记得你的朋友有：" + "、".join(values) + "。"
+                if kind == "relation":
+                    return f"我记得你的{predicate}有：" + "、".join(values) + "。"
             prompts = {
                 ("personal", "居住地"): "你还没有告诉我你住在哪里。",
                 ("personal", "生日"): "你还没有告诉我你的生日。",
                 ("personal", "职业"): "你还没有告诉我你的职业。",
-                ("relation", "朋友"): "你还没有告诉我谁是你的朋友。",
             }
-            return f"{address}，{prompts[route]}"
+            prompt = prompts.get(route, f"你还没有告诉我谁是你的{predicate}。")
+            return f"{address}，{prompt}"
 
         if any(w in text for w in ("喜欢什么", "讨厌什么", "喜好")):
             negative = "不喜欢" in text or "讨厌" in text
@@ -95,15 +97,6 @@ class MockProvider(BaseLLMProvider):
                 if values
                 else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。"
             )
-        named_preferences = [
-            fact
-            for fact in context.facts
-            if fact.kind == "preference" and fact.value and fact.value in text
-        ]
-        if named_preferences:
-            fact = named_preferences[0]
-            verb = "喜欢" if fact.predicate == "likes" else "不喜欢"
-            return f"你告诉过我，你{verb}{fact.value}。"
         if is_recall_query(text):
             if context.episodes:
                 return "我找到以前保存的经历：" + "；".join(
@@ -131,6 +124,18 @@ class MockProvider(BaseLLMProvider):
                 "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
             )
 
+        # A vague "X呢？" may safely surface the exact matching stored item. This is narrower
+        # than the old facts[0] fallback: questions about an unknown property of X still admit
+        # that the answer is unknown instead of presenting an unrelated relationship as evidence.
+        compact = text.strip().strip("。！？!? ")
+        exact_mentions = [
+            fact for fact in context.facts if compact in {fact.value + "呢", fact.subject + "呢"}
+        ]
+        if exact_mentions:
+            fact = exact_mentions[0]
+            origin = "你教过我" if fact.kind in {"world", "knowledge"} else "你告诉过我"
+            return f"{origin}：{_fact_sentence(fact)}。"
+
         if context.tone in {"teasing", "playful", "hostile", "ambiguous", "distress", "gentle"}:
             return {
                 "teasing": f"又逗我，{address} 😼 我也会慢慢学会的。",
@@ -154,6 +159,8 @@ class MockProvider(BaseLLMProvider):
         if any(w in text for w in ("再见", "晚安")):
             return f"{address}，下次见。记忆已经保存在本地，你可以随时退出。"
 
+        # Never label an arbitrary retrieved row as "related" just because lexical retrieval
+        # happened to return something. If no answer policy has evidence, admit the gap.
         curious = (
             "可以用“学习：事物是……”教我。"
             if context.growth.stage in {"newborn", "baby"}

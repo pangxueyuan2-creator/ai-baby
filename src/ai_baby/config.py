@@ -75,6 +75,16 @@ class Config:
                     raise ValueError("外部模式需显式设置 AI_BABY_ALLOW_EXTERNAL=true。")
                 if not self.model.strip() or (not local and not self.api_key.strip()):
                     raise ValueError("外部模式需要 AI_BABY_MODEL 和 AI_BABY_API_KEY。")
+                if self.provider == "grok" and (
+                    url.scheme != "https"
+                    or url.hostname != "api.x.ai"
+                    or port not in {None, 443}
+                    or url.path.rstrip("/") != "/v1"
+                ):
+                    raise ValueError(
+                        "grok 预设固定使用 https://api.x.ai/v1；"
+                        "自定义端点请使用 openai-compatible。"
+                    )
             if any(ord(c) < 32 or ord(c) == 127 for c in self.api_key):
                 raise ValueError("API key 格式无效。")
         return self

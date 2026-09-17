@@ -31,7 +31,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
-    """Works with POST /chat/completions, including the loopback-only Ollama preset."""
+    """Works with Chat Completions, including the Ollama and Grok presets."""
 
     def __init__(self, config: Config):
         self.config = config.validate()

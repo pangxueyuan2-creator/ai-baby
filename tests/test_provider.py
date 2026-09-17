@@ -18,6 +18,20 @@ def provider(tmp_path, url):
     )
 
 
+def test_ollama_loopback_preset_sends_no_authorization_header(baby, tmp_path, api_server):
+    url, seen, _ = api_server
+    baby.provider = OpenAICompatibleProvider(
+        Config(tmp_path, provider="ollama", base_url=url, model="fixture-local-model")
+    )
+
+    reply = baby.chat("你好")
+
+    assert reply.warning is None
+    assert len(seen) == 1
+    assert seen[0]["authorization"] is None
+    assert seen[0]["body"]["model"] == "fixture-local-model"
+
+
 def test_real_http_transport_keeps_identity_memory_and_stage(baby, tmp_path, api_server):
     url, seen, _ = api_server
     baby.chat("我喜欢草莓")
