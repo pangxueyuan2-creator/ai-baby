@@ -11,6 +11,11 @@ from typing import Any
 from .doctor import diagnose_database
 from .memory import MemoryError
 from .models import safe_output
+from .privacy_checksum import (
+    checksum_manifest_path,
+    verify_checksum_manifest,
+    write_checksum_manifest,
+)
 from .storage_files import reserve_private_file
 
 EXIT_OK = 0
@@ -133,7 +138,7 @@ def write_privacy_export(
     include_inactive: bool = False,
     pretty: bool = False,
 ) -> dict[str, Any]:
-    """Validate source first, then exclusively create an owner-private JSON export."""
+    """Validate source, then exclusively create a private JSON export plus checksum."""
     database = database.expanduser()
     output = output.expanduser()
     if database.resolve() == output.resolve():
@@ -160,6 +165,7 @@ def write_privacy_export(
         with output.open("w", encoding="utf-8", newline="\n") as stream:
             stream.write(text)
             stream.write("\n")
+        write_checksum_manifest(output)
     except BaseException:
         output.unlink(missing_ok=True)
         raise
@@ -201,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
             include_inactive=args.include_inactive,
             pretty=args.pretty,
         )
+        digest = verify_checksum_manifest(args.output, required=True)
     except (MemoryError, ValueError) as exc:
         message = str(exc)
         if args.json:
@@ -224,12 +231,16 @@ def main(argv: list[str] | None = None) -> int:
         "facts": len(payload["facts"]),
         "episodes": len(payload["episodes"]),
         "history_included": "history" in payload,
+        "checksum": digest,
+        "checksum_manifest": str(checksum_manifest_path(args.output.expanduser())),
     }
     if args.json:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     else:
         print("隐私导出完成：" + safe_output(str(args.output.expanduser())))
         print(f"facts={result['facts']} episodes={result['episodes']}")
+        print("SHA-256：" + str(result["checksum"]))
+        print("校验文件：" + safe_output(str(result["checksum_manifest"])))
         if "history" not in payload:
             print("原始聊天记录未包含；如确有需要，请显式使用 --include-history。")
     return EXIT_OK
