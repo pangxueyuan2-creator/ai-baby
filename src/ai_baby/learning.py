@@ -81,7 +81,6 @@ class Learner:
             elif relation:
                 candidate = ("relation", relation[2], relation[3], relation[1])
             elif taught:
-                # Preserve explicit negated prose instead of inventing a subject ending in 不.
                 fact = None if "不是" in taught[1] else re.fullmatch(r"(.+?)是(.+)", taught[1])
                 candidate = (
                     ("world", fact[1], "是", fact[2])
@@ -89,7 +88,6 @@ class Learner:
                     else ("knowledge", "所学知识", "内容", taught[1])
                 )
             elif event:
-                # Explicit events are deduplicated as facts before becoming episodes.
                 candidate = ("event", "用户", "经历", event[1])
             if candidate:
                 candidate = tuple(v.strip() for v in candidate)
@@ -105,7 +103,6 @@ class Learner:
         return result
 
     def _propose(self, candidate: MemoryCandidate) -> int:
-        """Persist a monotonic proposal ID so stale confirmations cannot target new data."""
         highest = self.memory.db.execute("SELECT coalesce(max(id),0) FROM candidates").fetchone()[0]
         candidate_id = max(highest, int(self.memory.setting("candidate_sequence", "0"))) + 1
         self.memory.set_setting("candidate_sequence", str(candidate_id))
@@ -118,7 +115,6 @@ class Learner:
     def _save(self, candidate: MemoryCandidate, result: LearningResult) -> None:
         candidate = candidate.validated()
         fields = (candidate.kind, candidate.subject, candidate.predicate, candidate.value)
-        # An explicit newer preference supersedes an obsolete proposal about the same object.
         if candidate.kind == "preference":
             for row in self.memory.db.execute(
                 "SELECT id,value FROM candidates WHERE kind='preference' AND subject=?",
@@ -126,6 +122,14 @@ class Learner:
             ).fetchall():
                 if self.memory.normalize(row["value"]) == self.memory.normalize(candidate.value):
                     self.memory.db.execute("DELETE FROM candidates WHERE id=?", (row["id"],))
+        previous = None
+        if candidate.kind == "personal":
+            row = self.memory.db.execute(
+                "SELECT value FROM facts WHERE kind=? AND subject=? AND predicate=? AND active=1",
+                fields[:3],
+            ).fetchone()
+            if row and self.memory.normalize(row[0]) != self.memory.normalize(candidate.value):
+                previous = row[0]
         changed = self.memory.learn(*fields)
         if changed:
             result.learned += 1
@@ -140,6 +144,11 @@ class Learner:
                 candidate.value if candidate.kind == "event" else " · ".join(fields[1:]),
                 fact_id=fact_id,
             )
-        result.acknowledgements.append(
-            ("我记住了：" if changed else "这条我已经记住了：") + " · ".join(fields[1:])
-        )
+        if previous and changed:
+            result.acknowledgements.append(
+                f"我把{candidate.predicate}改成{candidate.value}了（之前是{previous}）"
+            )
+        else:
+            result.acknowledgements.append(
+                ("我记住了：" if changed else "这条我已经记住了：") + " · ".join(fields[1:])
+            )
