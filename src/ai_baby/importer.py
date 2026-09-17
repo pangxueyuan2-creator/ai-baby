@@ -229,9 +229,7 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
     return portable
 
 
-def preflight_privacy_export(
-    source: Path, *, require_checksum: bool = False
-) -> dict[str, Any]:
+def preflight_privacy_export(source: Path, *, require_checksum: bool = False) -> dict[str, Any]:
     """Validate a portable export completely without creating a data directory or database."""
     portable = load_privacy_export(source, require_checksum=require_checksum)
     return {
@@ -354,9 +352,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.check:
-            result = preflight_privacy_export(
-                args.source, require_checksum=args.require_checksum
-            )
+            result = preflight_privacy_export(args.source, require_checksum=args.require_checksum)
         else:
             result = import_privacy_export(
                 args.source,
