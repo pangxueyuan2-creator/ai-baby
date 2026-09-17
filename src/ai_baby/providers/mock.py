@@ -154,7 +154,7 @@ class MockProvider(BaseLLMProvider):
             if context.growth.stage in {"newborn", "baby"}:
                 return f"{address}你好！我在这里，可以继续聊今天的新鲜事。"
             if context.growth.stage == "child":
-                return f"{address}你好。我还记得我们最近聊过的事，想接着说哪一件？"
+                return f"{address}你好。我会试着把新内容和能找到的旧记录联系起来。"
             return f"{address}你好。有想核对的旧记忆，或想新教我的内容，都可以直接说。"
         if any(w in text for w in ("再见", "晚安")):
             return f"{address}，下次见。记忆已经保存在本地，你可以随时退出。"
