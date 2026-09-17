@@ -55,7 +55,9 @@ def test_mock_does_not_present_arbitrary_retrieval_as_related_answer(baby):
 
     reply = baby.chat("小明今天吃什么？").text
 
-    assert "小明" in reply  # It may quote the user's question, but not the stored friend fact as an answer.
+    assert (
+        "小明" in reply
+    )  # It may quote the user's question, but not the stored friend fact as an answer.
     assert "相关记录" not in reply
     assert "还没有学过相关知识" in reply
 
