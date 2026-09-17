@@ -43,11 +43,11 @@ _REVERSAL = re.compile(
 )
 _QUESTIONS = ("?", "？", "什么", "吗", "是否", "哪里", "哪儿", "谁", "是不是", "对不对", "还是")
 _NON_ASSERTIONS = (
-    "“",
-    "”",
+    "\u201c",
+    "\u201d",
     '"',
-    "‘",
-    "’",
+    "\u2018",
+    "\u2019",
     "如果",
     "假如",
     "假设",
@@ -73,7 +73,7 @@ def assertion_clauses(text: str) -> list[str]:
     Unknown temporal qualifiers are rejected instead of becoming part of a fact value.
     """
     clauses = []
-    for sentence in re.split(r"[。！!；;\n]+", text):
+    for sentence in re.split(r"[。！!;；\n]+", text):
         sentence = sentence.strip().rstrip(".")
         event = re.match(r"(?:重要事件|今天发生了)[：:]", sentence)
         questions = (
@@ -85,11 +85,9 @@ def assertion_clauses(text: str) -> list[str]:
             continue
         if sentence.startswith("我喜欢的") or "住院" in sentence:
             continue
-        # Resolve this exact, explicit anaphoric negation before splitting the comma.
         if _REVERSAL.fullmatch(sentence):
             clauses.append(sentence)
             continue
-        # Explicit teaching/event syntax may legitimately contain descriptive commas.
         if re.match(r"(?:记住|学习|知识|重要事件|今天发生了|关系)[：:]", sentence):
             clauses.append(sentence)
             continue
@@ -97,7 +95,6 @@ def assertion_clauses(text: str) -> list[str]:
             clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
             if sentence.startswith("我") and clause.startswith(("现在", "已经", "不再")):
                 clause = "我" + clause
-            # Do not swallow a second proposition into a personal fact's object.
             if any(cue in clause for cue in ("但是", "但", "不过", "虽然", "因为", "然后")):
                 continue
             if re.search(r"(?:喜欢|讨厌).+(?:喜欢|讨厌)", clause):
@@ -120,7 +117,8 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     if negative:
         return MemoryCandidate("preference", "用户", "dislikes", negative[1]).validated()
     preference = re.fullmatch(
-        r"(?:其实)?我(?:现在)?(?:从小)?(?:就)?(?:一直)?(?:特别|很)?喜欢(.+)", sentence
+        r"(?:其实)?我(?:现在)?(?:也|还|又)?(?:从小)?(?:就)?(?:一直)?(?:特别|很|超|好|挺)?喜欢(.+)",
+        sentence,
     )
     favorite = re.fullmatch(r"(?:其实)?(.+?)是我最喜欢的(?:水果|动物|食物|颜色)", sentence)
     address = re.fullmatch(r"我(?:现在住(?:在)?|住在)(.+)", sentence)
