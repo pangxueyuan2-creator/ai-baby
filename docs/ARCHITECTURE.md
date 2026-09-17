@@ -137,6 +137,16 @@ Curiosity can schedule one question after at least six turns, then no more than 
 
 ## User control and provider failure modes
 
+The English preference alias uses complete local predicates (`like`, `dislike`,
+`do not like`, `don't like`). Negation of another verb is not a preference.
+Before comma splitting, every part of a sentence containing an English
+preference cue must match the supported simple grammar. This prevents reporting,
+conditional or tag-question scope from disappearing. Qualified/uncertain objects
+are conservatively rejected using word boundaries; they do not become English
+candidates. Explicit teaching commands and the existing Chinese candidate flow
+are preserved. This is bounded lexical validation, not general English parsing,
+and it does not reinterpret or migrate earlier saved facts.
+
 `/forget ID` marks the selected fact (active or superseded) and directly linked / normalized-content-matching episodes inactive. Matching question text is cleared, including a question associated with another fact. It also clears recent dialogue, cached answer bodies, pending candidates and journals so those secondary copies cannot revive the fact. Receipt identities become revoked tombstones, as described above. Metrics are refreshed; past developmental stage and personality do not regress. Inactive rows, input digests and previous backups remain on disk: **this is recall suppression, not secure erasure**. Other independent facts are not a semantic dependency graph, and re-teaching can intentionally save the same information again.
 
 Emotion episodes now store only tone and simulated state. Legacy emotion episodes

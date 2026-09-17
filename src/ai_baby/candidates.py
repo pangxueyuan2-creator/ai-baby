@@ -64,6 +64,32 @@ _NON_ASSERTIONS = (
     "比如",
     "例句",
 )
+_ENGLISH_PREFERENCE_CUE = re.compile(
+    r"\bi\s+(?:really\s+)?(?:like|dislike|do\s+not|don't)\b", re.IGNORECASE
+)
+_ENGLISH_PREFERENCE = re.compile(
+    r"i\s+(?:really\s+)?(?:(?P<positive>like)|dislike|(?:do\s+not|don't)\s+like)\s+(?P<value>.+)",
+    re.IGNORECASE,
+)
+_ENGLISH_QUALIFIER = re.compile(
+    r"\b(?:if|unless|when|maybe|perhaps|possibly|probably|might|would|could|should|but|"
+    r"although|because|whether|unsure|uncertain|used\s+to|not|or|"
+    r"i|you|he|she|they|we)\b",
+    re.IGNORECASE,
+)
+
+
+def _english_preference(sentence: str) -> MemoryCandidate | None:
+    """Recognize a complete simple preference; decline complex or qualified objects."""
+    match = _ENGLISH_PREFERENCE.fullmatch(sentence)
+    if not match:
+        return None
+    value = match["value"]
+    if _ENGLISH_QUALIFIER.search(value) or re.search(r"[.;?!]", value):
+        return None
+    # Follow the matched grammar branch; Unicode IGNORECASE is not str.lower().
+    predicate = "likes" if match["positive"] is not None else "dislikes"
+    return MemoryCandidate("preference", "用户", predicate, value).validated()
 
 
 def assertion_clauses(text: str) -> list[str]:
@@ -91,6 +117,11 @@ def assertion_clauses(text: str) -> list[str]:
         if re.match(r"(?:记住|学习|知识|重要事件|今天发生了|关系)[：:]", sentence):
             clauses.append(sentence)
             continue
+        if _ENGLISH_PREFERENCE_CUE.search(sentence):
+            # Do not discard a qualifier/report/tag question when splitting commas.
+            # Every part must be a complete supported assertion; otherwise abstain.
+            if not all(_english_preference(part.strip()) for part in re.split(r"[，,]+", sentence)):
+                continue
         for clause in re.split(r"[，,]+", sentence):
             clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
             if sentence.startswith("我") and clause.startswith(("现在", "已经", "不再")):
@@ -126,20 +157,13 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     friend = re.fullmatch(r"我的朋友叫(.+)", sentence)
     named_relation = re.fullmatch(r"我的(朋友|同学|老师|同事|家人)叫(.+)", sentence)
     reverse_relation = re.fullmatch(r"(.+?)是我(?:的)?(朋友|同学|老师|同事|家人)", sentence)
-    english_like = re.fullmatch(r"i\s+(?:really\s+)?like\s+(.+)", sentence, flags=re.IGNORECASE)
-    english_dislike = re.fullmatch(
-        r"i\s+(?:really\s+)?(?:do\s+not|don't|dislike)\s+(.+)",
-        sentence,
-        flags=re.IGNORECASE,
-    )
+    english_preference = _english_preference(sentence)
     if preference:
         return MemoryCandidate("preference", "用户", "likes", preference[1]).validated()
     if favorite:
         return MemoryCandidate("preference", "用户", "likes", favorite[1]).validated()
-    if english_like:
-        return MemoryCandidate("preference", "用户", "likes", english_like[1]).validated()
-    if english_dislike:
-        return MemoryCandidate("preference", "用户", "dislikes", english_dislike[1]).validated()
+    if english_preference:
+        return english_preference
     if address and "住院" not in sentence:
         return MemoryCandidate("personal", "用户", "居住地", address[1]).validated()
     if home_address and "住院" not in sentence:
