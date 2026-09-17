@@ -24,7 +24,6 @@ def _fact_sentence(fact: Fact) -> str:
 
 
 def _episode_sentence(summary: str) -> str:
-    """Hide the internal subject · predicate · value dump in recalled episodes."""
     parts = [part.strip() for part in summary.split(" · ")]
     if len(parts) == 3 and parts[1] == "经历":
         return parts[2]
@@ -39,13 +38,17 @@ def _episode_sentence(summary: str) -> str:
 
 
 def _learning_reply(context: Context) -> str | None:
-    """Make successful teaching feel like a growing character, not a database dump."""
+    replacements = [
+        ack for ack in context.learning.acknowledgements if ack.startswith("我把") and "改成" in ack
+    ]
+    address = context.profile.address
+    if replacements:
+        return f"{address}，{replacements[0]}。"
     learned_ids = set(context.learning.fact_ids)
     learned = [fact for fact in context.facts if fact.id in learned_ids]
     if not learned:
         return None
     summary = "；".join(_fact_sentence(fact) for fact in learned[:4])
-    address = context.profile.address
     stage = context.growth.stage
     if stage == "newborn":
         return f"{address}，我先记住啦：{summary}。"
@@ -59,8 +62,6 @@ def _learning_reply(context: Context) -> str | None:
 
 
 class MockProvider(BaseLLMProvider):
-    """No generative model: useful memory Q&A, teaching, roleplay and basic conversation."""
-
     def generate(self, context: Context) -> str:
         text = context.user_text
         address = context.profile.address
@@ -76,13 +77,8 @@ class MockProvider(BaseLLMProvider):
         if any(w in text for w in ("我叫什么", "我的名字", "我是谁")):
             return f"你叫{context.profile.name}，是照顾我的人，我称呼你为{address}。"
         if any(w in text for w in ("我的性别", "我是男", "我是女")):
-            gender = {"male": "男", "female": "女", "other": "其他 / 不想透露"}[
-                context.profile.gender
-            ]
+            gender = {"male": "男", "female": "女", "other": "其他 / 不想透露"}[context.profile.gender]
             return f"你保存的性别选择是“{gender}”，我称呼你为{address}。"
-
-        # Explicit memory questions take priority over tone. "谢谢，我住在哪里？" should
-        # answer the saved profile fact instead of being swallowed by the gentle-tone policy.
         route = fact_query_route(text)
         if route is not None:
             kind, predicate = route
@@ -108,65 +104,35 @@ class MockProvider(BaseLLMProvider):
             }
             prompt = prompts.get(route, f"你还没有告诉我谁是你的{predicate}。")
             return f"{address}，{prompt}"
-
         if any(w in text for w in ("喜欢什么", "讨厌什么", "喜好")):
             negative = "不喜欢" in text or "讨厌" in text
             predicate = "dislikes" if negative else "likes"
             values = [f.value for f in context.facts if f.predicate == predicate]
-            return (
-                ("你" + ("不喜欢" if negative else "喜欢") + "、".join(values) + "。")
-                if values
-                else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。"
-            )
+            return (("你" + ("不喜欢" if negative else "喜欢") + "、".join(values) + "。") if values else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。")
         events = [fact for fact in context.facts if fact.kind == "event"]
         if is_recall_query(text) or is_experience_query(text):
             if events:
                 return "我记得：" + "；".join(fact.value for fact in events[:2]) + "。"
             if context.episodes:
-                return "我找到以前保存的经历：" + "；".join(
-                    _episode_sentence(episode["summary"]) for episode in context.episodes[:2]
-                )
+                return "我找到以前保存的经历：" + "；".join(_episode_sentence(episode["summary"]) for episode in context.episodes[:2])
             return "我在本地记忆中没有找到这段共同经历，不能确定我们以前是否谈过。"
-        mentioned = [
-            fact
-            for fact in events
-            if len(token := text.strip().strip("。！？!? ")) >= 2 and token in fact.value
-        ]
+        mentioned = [fact for fact in events if len(token := text.strip().strip("。！？!? ")) >= 2 and token in fact.value]
         if mentioned and not any(w in text for w in ("吃", "喝", "工作", "职业")):
             return "我记得：" + mentioned[0].value + "。"
-
-        subjects = [
-            f
-            for f in context.facts
-            if f.subject in text
-            and (f.kind == "world" or (f.kind == "relation" and f.predicate in text))
-        ]
+        subjects = [f for f in context.facts if f.subject in text and (f.kind == "world" or (f.kind == "relation" and f.predicate in text))]
         if subjects:
             fact = subjects[0]
-            answer = (
-                f"{fact.subject}是{fact.value}。"
-                if fact.predicate == "是"
-                else f"{fact.subject}的{fact.predicate}是{fact.value}。"
-            )
+            answer = f"{fact.subject}是{fact.value}。" if fact.predicate == "是" else f"{fact.subject}的{fact.predicate}是{fact.value}。"
             return "你教过我：" + answer
         personal = [f for f in context.facts if f.kind == "personal" and f.predicate in text]
         if personal:
-            return (
-                "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
-            )
-
-        # A vague "X呢？" may safely surface the exact matching stored item. This is narrower
-        # than the old facts[0] fallback: questions about an unknown property of X still admit
-        # that the answer is unknown instead of presenting an unrelated relationship as evidence.
+            return "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
         compact = text.strip().strip("。！？!? ")
-        exact_mentions = [
-            fact for fact in context.facts if compact in {fact.value + "呢", fact.subject + "呢"}
-        ]
+        exact_mentions = [fact for fact in context.facts if compact in {fact.value + "呢", fact.subject + "呢"}]
         if exact_mentions:
             fact = exact_mentions[0]
             origin = "你教过我" if fact.kind in {"world", "knowledge"} else "你告诉过我"
             return f"{origin}：{_fact_sentence(fact)}。"
-
         if context.tone in {"teasing", "playful", "hostile", "ambiguous", "distress", "gentle"}:
             return {
                 "teasing": f"又逗我，{address} 😼 我也会慢慢学会的。",
@@ -190,19 +156,12 @@ class MockProvider(BaseLLMProvider):
         if any(w in text for w in ("讲个故事", "讲故事", "说个故事")):
             taught = [fact for fact in context.facts if fact.kind in {"world", "event"}][:2]
             if taught:
-                return (
-                    f"{address}，我还小，不会编新故事。我记得你告诉过我："
-                    + "；".join(_fact_sentence(fact) for fact in taught)
-                    + "。"
-                )
+                return f"{address}，我还小，不会编新故事。我记得你告诉过我：" + "；".join(_fact_sentence(fact) for fact in taught) + "。"
             return f"{address}，我还小，不会编新故事。你先讲一件事，我可以帮你记住。"
         if any(w in text for w in ("你觉得我怎么样", "我这个人怎么样")):
             return f"{address}，我没有真实评价，只记得你是照顾我的{address}，叫{context.profile.name}。"
         if any(w in text.casefold() for w in ("1+1", "一加一")):
             return "这是一般知识：1+1等于2。不是你专门教过我的。"
-
-        # Never label an arbitrary retrieved row as "related" just because lexical retrieval
-        # happened to return something. If no answer policy has evidence, admit the gap.
         curious = (
             "你可以直接告诉我，比如“海豚是哺乳动物”。"
             if context.growth.stage in {"newborn", "baby"}
@@ -210,9 +169,6 @@ class MockProvider(BaseLLMProvider):
         )
         if context.personality.caution >= 60:
             curious = "我想先核对你说的内容。我们可以一步一步来。"
-        elif context.personality.confidence >= 60 and context.growth.stage not in {
-            "newborn",
-            "baby",
-        }:
+        elif context.personality.confidence >= 60 and context.growth.stage not in {"newborn", "baby"}:
             curious = "我愿意试着联系已有的知识，但会区分猜测和记忆。"
         return f"{address}，我听到了你说的“{text[:100]}”。我还没有学过相关知识。{curious}"
