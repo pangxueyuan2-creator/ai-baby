@@ -6,6 +6,7 @@ from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from .backup import verify_checksum_manifest
 from .memory import MemoryError, MemoryStore
 from .migrations import MIGRATIONS, SCHEMA_VERSION
 from .models import safe_output
@@ -17,7 +18,7 @@ def restore_backup(source: Path, data_dir: Path) -> Path:
     The source backup is opened read-only, copied through SQLite's backup API, migrated and
     validated in a private temporary directory, then copied into the final destination. The
     final ``baby.sqlite3`` is created exclusively and is never allowed to replace an existing
-    store.
+    store. If an adjacent ``.sha256`` manifest exists, it is verified before SQLite is opened.
     """
     source = source.expanduser()
     destination = data_dir.expanduser() / "baby.sqlite3"
@@ -27,6 +28,7 @@ def restore_backup(source: Path, data_dir: Path) -> Path:
     if destination.exists():
         raise ValueError("目标数据目录已经存在 baby.sqlite3；为避免覆盖现有宝宝，恢复已取消。")
 
+    verify_checksum_manifest(source)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".ai-baby-restore-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "baby.sqlite3"
@@ -70,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="验证 AI Baby SQLite 备份并恢复到一个不含 baby.sqlite3 的数据目录"
     )
-    parser.add_argument("backup", type=Path, help="由 /backup 创建的 .sqlite3 文件")
+    parser.add_argument("backup", type=Path, help="由 /backup 或 ai-baby-backup 创建的 .sqlite3 文件")
     parser.add_argument(
         "--data-dir",
         type=Path,
