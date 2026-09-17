@@ -60,4 +60,5 @@ jobs:
           "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-backup" --help
           "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-doctor" --help
           "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-export" --help
+          "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-import" --help
           "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-restore" --help
