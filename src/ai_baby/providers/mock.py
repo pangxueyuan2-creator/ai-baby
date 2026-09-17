@@ -1,7 +1,45 @@
 """Honest offline baseline using retrieved evidence and composable response policies."""
 
 from ..conversation import Context, fact_query_route, is_recall_query
+from ..models import Fact
 from .base import BaseLLMProvider
+
+
+def _fact_sentence(fact: Fact) -> str:
+    """Render stored triples as normal Chinese instead of exposing internal predicates."""
+    if fact.kind == "preference":
+        return f"你{'喜欢' if fact.predicate == 'likes' else '不喜欢'}{fact.value}"
+    if fact.kind == "personal":
+        return {
+            "居住地": f"你住在{fact.value}",
+            "生日": f"你的生日是{fact.value}",
+            "职业": f"你的职业是{fact.value}",
+        }.get(fact.predicate, f"你的{fact.predicate}是{fact.value}")
+    if fact.kind == "world" and fact.predicate == "是":
+        return f"{fact.subject}是{fact.value}"
+    if fact.kind == "relation":
+        return f"{fact.subject}的{fact.predicate}是{fact.value}"
+    return fact.value
+
+
+def _learning_reply(context: Context) -> str | None:
+    """Make successful teaching feel like a growing character, not a database dump."""
+    learned_ids = set(context.learning.fact_ids)
+    learned = [fact for fact in context.facts if fact.id in learned_ids]
+    if not learned:
+        return None
+    summary = "；".join(_fact_sentence(fact) for fact in learned[:4])
+    address = context.profile.address
+    stage = context.growth.stage
+    if stage == "newborn":
+        return f"{address}，我先记住啦：{summary}。"
+    if stage == "baby":
+        return f"{address}，我记住了：{summary}。以后再聊到它，我会试着想起来。"
+    if stage == "child":
+        return f"{address}，我记住了：{summary}。我会把它和以后学到的内容慢慢联系起来。"
+    if stage == "growing":
+        return f"{address}，我把这条经历记下来了：{summary}。以后遇到相关话题，我会结合已有记忆再回答。"
+    return f"{address}，我已经把它作为你明确告诉我的记录保存下来：{summary}。我会把这份记忆和一般知识区分开。"
 
 
 class MockProvider(BaseLLMProvider):
@@ -11,6 +49,9 @@ class MockProvider(BaseLLMProvider):
         text = context.user_text
         address = context.profile.address
         if context.learning.acknowledgements:
+            natural = _learning_reply(context)
+            if natural:
+                return natural
             return address + "，" + "；".join(context.learning.acknowledgements[:4]) + "。"
         if any(w in text for w in ("你是谁", "你是人", "真实感受", "有意识")):
             return f"{address}，我是{context.baby_name}，一个软件角色，不是真实人类。我的情绪和成长都是模拟状态。我可以从我们的交流中保存记忆。"
