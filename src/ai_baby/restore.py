@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from .memory import MemoryError, MemoryStore
+from .migrations import MIGRATIONS, SCHEMA_VERSION
 from .models import safe_output
 
 
@@ -37,6 +38,9 @@ def restore_backup(source: Path, data_dir: Path) -> Path:
                 check = reader.execute("PRAGMA quick_check").fetchone()
                 if check is None or check[0] != "ok":
                     raise MemoryError("备份数据库完整性检查未通过；目标未修改。")
+                version = reader.execute("PRAGMA user_version").fetchone()[0]
+                if version not in {SCHEMA_VERSION, *MIGRATIONS}:
+                    raise MemoryError("备份数据库版本不受支持；目标未修改。")
                 reader.backup(target)
         except sqlite3.Error as exc:
             raise MemoryError("备份文件不是可恢复的 SQLite 数据库；目标未修改。") from exc
