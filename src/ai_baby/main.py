@@ -37,7 +37,31 @@ HELP = """
 /candidates  查看最多三条待确认记忆
 /baby-name 名字  给宝宝取名
 /help        查看帮助
+中文别名：/帮助 /状态 /资料 /记忆 /经历 /人格 /日记 /备份 /导出
+         /遗忘 /确认 /忽略 /候选 /名字 /称呼 /宝宝名 /退出
 """.strip()
+
+
+COMMAND_ALIASES = {
+    "/退出": "/quit",
+    "/离开": "/exit",
+    "/帮助": "/help",
+    "/状态": "/status",
+    "/资料": "/profile",
+    "/记忆": "/memories",
+    "/经历": "/events",
+    "/人格": "/personality",
+    "/日记": "/journal",
+    "/备份": "/backup",
+    "/导出": "/export",
+    "/遗忘": "/forget",
+    "/确认": "/confirm",
+    "/忽略": "/reject",
+    "/候选": "/candidates",
+    "/名字": "/name",
+    "/称呼": "/address",
+    "/宝宝名": "/baby-name",
+}
 
 
 def prompt_valid(prompt: str, maximum: int = 80) -> str:
@@ -77,7 +101,8 @@ def onboarding(baby: Baby) -> None:
 
 def command(baby: Baby, text: str) -> bool:
     """Run a local command. Return false only for explicit exit."""
-    name, _, argument = text.partition(" ")
+    raw_name, _, argument = text.partition(" ")
+    name = COMMAND_ALIASES.get(raw_name, raw_name)
     memory = baby.memory
     if name in {"/forget", "/confirm", "/reject"} and (
         not argument.isascii() or not argument.isdecimal() or not 0 < int(argument) < 2**63
@@ -170,16 +195,17 @@ def main(argv: list[str] | None = None) -> int:
         config = Config.load(args.data_dir, args.env_file)
         provider = MockProvider() if config.provider == "mock" else OpenAICompatibleProvider(config)
         print("==============================\nAI Baby / AI 宝宝\n==============================")
-        if config.provider == "mock":
-            print("模式：基础离线（无网络请求）")
-        elif config.provider == "ollama":
-            print(
-                "模式：本地 Ollama；你的输入、资料、相关记忆和近期聊天只发送到本机回环地址。"
+        modes = {
+            "mock": "模式：基础离线（无网络请求）",
+            "ollama": "模式：本地 Ollama；你的输入、资料、相关记忆和近期聊天只发送到本机回环地址。",
+            "grok": "模式：xAI Grok；你的输入、资料、相关记忆和近期聊天将发送到 api.x.ai。",
+        }
+        print(
+            modes.get(
+                config.provider,
+                "模式：外部 LLM；你的输入、资料、相关记忆和近期聊天将发送到所配置的服务。",
             )
-        else:
-            print(
-                "模式：外部 LLM；你的输入、资料、相关记忆和近期聊天将发送到所配置的服务。"
-            )
+        )
         memory = MemoryStore(config.data_dir.resolve() / "baby.sqlite3")
         baby = Baby(memory, provider)
         print(f"数据目录：{memory.path.parent}")
