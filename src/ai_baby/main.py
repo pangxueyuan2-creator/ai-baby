@@ -194,11 +194,12 @@ def main(argv: list[str] | None = None) -> int:
         config = Config.load(args.data_dir, args.env_file)
         provider = MockProvider() if config.provider == "mock" else OpenAICompatibleProvider(config)
         print("==============================\nAI Baby / AI 宝宝\n==============================")
-        print(
-            "模式：基础离线（无网络请求）"
-            if config.provider == "mock"
-            else "模式：外部 LLM；你的输入、资料、相关记忆和近期聊天将发送到所配置的服务。"
-        )
+        if config.provider == "mock":
+            print("模式：基础离线（无网络请求）")
+        elif config.provider == "ollama":
+            print("模式：本地 Ollama；你的输入、资料、相关记忆和近期聊天只发送到本机回环地址。")
+        else:
+            print("模式：外部 LLM；你的输入、资料、相关记忆和近期聊天将发送到所配置的服务。")
         memory = MemoryStore(config.data_dir.resolve() / "baby.sqlite3")
         baby = Baby(memory, provider)
         print(f"数据目录：{memory.path.parent}")

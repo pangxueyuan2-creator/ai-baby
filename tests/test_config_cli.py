@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from ai_baby.config import Config, read_env
+from ai_baby.providers.openai_compatible import OpenAICompatibleProvider
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,6 +45,33 @@ def test_external_requires_opt_in_and_model(tmp_path):
     with pytest.raises(ValueError):
         Config(
             tmp_path, provider="openai-compatible", api_key="fixture-key", allow_external=True
+        ).validate()
+
+
+def test_ollama_preset_defaults_to_loopback_without_external_opt_in(monkeypatch, tmp_path):
+    for key in list(os.environ):
+        if key.startswith("AI_BABY_"):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv("AI_BABY_PROVIDER", "ollama")
+    monkeypatch.setenv("AI_BABY_MODEL", "fixture-local-model")
+
+    config = Config.load(tmp_path, tmp_path / "absent.env")
+
+    assert config.provider == "ollama"
+    assert config.base_url == "http://127.0.0.1:11434/v1"
+    assert config.api_key == ""
+    assert config.allow_external is False
+    assert config.is_loopback
+    OpenAICompatibleProvider(config)  # The preset reuses the hardened local Chat Completions path.
+
+
+def test_ollama_preset_rejects_remote_hosts(tmp_path):
+    with pytest.raises(ValueError, match="ollama"):
+        Config(
+            tmp_path,
+            provider="ollama",
+            base_url="https://example.com/v1",
+            model="fixture-local-model",
         ).validate()
 
 
