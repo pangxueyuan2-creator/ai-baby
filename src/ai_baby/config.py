@@ -41,13 +41,13 @@ class Config:
 
     def validate(self) -> "Config":
         """Validate before any data is sent to a generation provider."""
-        if self.provider not in {"mock", "openai-compatible", "ollama"}:
-            raise ValueError("未知 provider；请选择 mock、ollama 或 openai-compatible。")
+        if self.provider not in {"mock", "openai-compatible", "ollama", "grok"}:
+            raise ValueError("未知 provider；请选择 mock、ollama、grok 或 openai-compatible。")
         if not 1 <= self.timeout <= 120:
             raise ValueError("超时时间必须在 1–120 秒之间。")
         if self.max_retries not in {0, 1, 2} or not 0 <= self.retry_backoff <= 2:
             raise ValueError("重试次数必须在 0–2，退避时间必须在 0–2 秒。")
-        if self.provider in {"openai-compatible", "ollama"}:
+        if self.provider in {"openai-compatible", "ollama", "grok"}:
             if any(ord(c) <= 32 or 127 <= ord(c) <= 159 for c in self.base_url):
                 raise ValueError("API 地址不能包含空白或控制字符。")
             try:
@@ -86,11 +86,10 @@ class Config:
         provider = values.get("AI_BABY_PROVIDER", "mock")
         base_url = values.get("AI_BABY_BASE_URL", "").strip()
         if not base_url:
-            base_url = (
-                "http://127.0.0.1:11434/v1"
-                if provider == "ollama"
-                else "https://api.openai.com/v1"
-            )
+            base_url = {
+                "ollama": "http://127.0.0.1:11434/v1",
+                "grok": "https://api.x.ai/v1",
+            }.get(provider, "https://api.openai.com/v1")
         return cls(
             data_dir=data_dir
             or Path(values.get("AI_BABY_DATA_DIR", str(Path.home() / ".ai-baby"))).expanduser(),
