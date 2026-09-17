@@ -23,6 +23,7 @@ from .models import (
     record,
     safe_output,
 )
+from .storage_files import reserve_private_file
 
 EXIT_OK = 0
 EXIT_INVALID = 1
@@ -226,9 +227,14 @@ def import_privacy_export(source: Path, data_dir: Path) -> dict[str, Any]:
     if os.path.lexists(database):
         raise ValueError("目标数据目录已经包含 baby.sqlite3；为避免覆盖，导入已拒绝。")
 
+    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        reserve_private_file(database)
+    except FileExistsError as exc:
+        raise ValueError("目标数据目录已经包含 baby.sqlite3；为避免覆盖，导入已拒绝。") from exc
+
     memory: MemoryStore | None = None
     try:
-        data_dir.mkdir(parents=True, exist_ok=True)
         memory = MemoryStore(database)
         fact_ids: dict[int, int] = {}
         with memory.transaction():
