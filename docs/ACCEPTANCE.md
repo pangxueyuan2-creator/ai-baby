@@ -131,6 +131,13 @@ python scripts/acceptance_demo.py
 
 ## 已知验证范围
 
+英文偏好保存边界：`python -m pytest tests/test_english_preference_safety.py -q`。
+25 个虚构数据案例覆盖非偏好否定不保存、同一对象的否定纠正及重启恢复、
+逗号前后不确定/条件/转述/附加疑问范围、复杂对象拒绝，以及简单声明和原显式教学保留。
+初始 21 项在基线 `dba4ddc` 上 19 项失败、2 项通过；审查再补充四项 Unicode
+大小写与复合对象检查，修复后全部通过。数据库仍为 v3，
+不会自动重解释或改写旧事实，不支持完整英文自然语言理解。
+
 情绪摘录遗忘回归：`python -m pytest tests/test_emotion_forget_privacy.py -q`。
 八个虚构数据案例覆盖三种情绪变化不复制输入、有效/已替代长事实的旧摘录清理、
 重启后的检索/导出/日记/provider context、不相关结构化事件保留、未知 ID 无操作和
