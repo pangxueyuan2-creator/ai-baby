@@ -52,11 +52,7 @@ def _learning_reply(context: Context) -> str | None:
     replacements = [
         ack for ack in context.learning.acknowledgements if ack.startswith("我把") and "改成" in ack
     ]
-    kept = [
-        ack
-        for ack in context.learning.acknowledgements
-        if ack.startswith("还是记着更具体的")
-    ]
+    kept = [ack for ack in context.learning.acknowledgements if ack.startswith("还是记着更具体的")]
     address = context.profile.address
     if replacements:
         return f"{address}，{replacements[0]}。"
@@ -293,7 +289,9 @@ class MockProvider(BaseLLMProvider):
             return f"{address}，我还小，不会编新故事。你先讲一件事，我可以帮你记住。"
         if any(w in text for w in ("你觉得我怎么样", "我这个人怎么样")):
             if address == context.profile.name:
-                return f"{address}，我没有真实评价，只记得你是照顾我的人，叫{context.profile.name}。"
+                return (
+                    f"{address}，我没有真实评价，只记得你是照顾我的人，叫{context.profile.name}。"
+                )
             return f"{address}，我没有真实评价，只记得你是照顾我的{address}，叫{context.profile.name}。"
         if any(w in text.casefold() for w in ("1+1", "一加一")):
             return "这是一般知识：1+1等于2。不是你专门教过我的。"

@@ -124,7 +124,8 @@ def extract_candidates(sentence: str) -> list[MemoryCandidate]:
     if extracted.kind != "preference":
         return [extracted]
     return [
-        replace(extracted, value=part).validated() for part in split_preference_objects(extracted.value)
+        replace(extracted, value=part).validated()
+        for part in split_preference_objects(extracted.value)
     ]
 
 

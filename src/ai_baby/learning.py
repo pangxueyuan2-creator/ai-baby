@@ -176,7 +176,9 @@ class Learner:
                 "SELECT id,value FROM facts WHERE kind=? AND subject=? AND predicate=? AND active=1",
                 fields[:3],
             ).fetchone()
-            if row and self.memory.normalize(row["value"]) != self.memory.normalize(candidate.value):
+            if row and self.memory.normalize(row["value"]) != self.memory.normalize(
+                candidate.value
+            ):
                 previous = row["value"]
                 if candidate.predicate == "居住地" and is_coarser_place(candidate.value, previous):
                     result.acknowledgements.append(

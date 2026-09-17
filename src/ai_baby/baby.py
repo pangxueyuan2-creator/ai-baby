@@ -169,7 +169,8 @@ class Baby:
         except (ProviderError, TimeoutError) as exc:
             category = exc.category if isinstance(exc, ProviderError) else "timeout"
             warning = f"模型服务不可用（{category}）；本轮使用离线回复。"
-            logger.warning("provider_fallback")
+            # The caller receives the warning; CLI coalesces repeats and announces recovery.
+            logger.debug("provider_fallback")
             answer = MockProvider().generate(context)
         if context.learning.pending:
             proposed = context.learning.pending[0]
