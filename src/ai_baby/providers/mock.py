@@ -41,9 +41,7 @@ def _episode_sentence(summary: str) -> str:
 def _learning_reply(context: Context) -> str | None:
     """Make successful teaching feel like a growing character, not a database dump."""
     replacements = [
-        ack
-        for ack in context.learning.acknowledgements
-        if ack.startswith("我把") and "改成" in ack
+        ack for ack in context.learning.acknowledgements if ack.startswith("我把") and "改成" in ack
     ]
     address = context.profile.address
     if replacements:
