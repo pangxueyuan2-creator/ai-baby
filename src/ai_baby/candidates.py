@@ -41,7 +41,7 @@ class MemoryCandidate:
 _REVERSAL = re.compile(
     r"我(?:以前|曾经)?喜欢([^，,]+)[，,]\s*(?:但是|但)?(?:我)?(?:现在|已经)不喜欢(?:了)?"
 )
-_QUESTIONS = ("?", "？", "什么", "吗", "是否", "哪里", "哪儿", "谁", "是不是", "对不对", "还是")
+_QUESTIONS = ("?", "？", "什么", "吗", "是否", "哪里", "哪儿", "谁", "是不是", "对不对")
 _NON_ASSERTIONS = (
     "\u201c",
     "\u201d",
@@ -92,6 +92,18 @@ def _english_preference(sentence: str) -> MemoryCandidate | None:
     return MemoryCandidate("preference", "用户", predicate, value).validated()
 
 
+def _unsupported_still(sentence: str) -> bool:
+    """Treat 还是 as 'still' only in an explicit first-person assertion prefix.
+
+    The same token commonly means an alternative question (苹果还是香蕉). If it is
+    not the supported 我[现在]还是... prefix, or appears again in the object, abstain.
+    """
+    if "还是" not in sentence:
+        return False
+    remainder = re.sub(r"^(?:其实)?我(?:现在)?还是", "", sentence, count=1)
+    return remainder == sentence or "还是" in remainder
+
+
 def assertion_clauses(text: str) -> list[str]:
     """Split explicit clauses without stripping the scope of questions or hypotheticals.
 
@@ -107,7 +119,11 @@ def assertion_clauses(text: str) -> list[str]:
             if event
             else _QUESTIONS
         )
-        if not sentence or any(cue in sentence for cue in (*questions, *_NON_ASSERTIONS)):
+        if (
+            not sentence
+            or _unsupported_still(sentence)
+            or any(cue in sentence for cue in (*questions, *_NON_ASSERTIONS))
+        ):
             continue
         if sentence.startswith("我喜欢的") or "住院" in sentence:
             continue
@@ -126,7 +142,10 @@ def assertion_clauses(text: str) -> list[str]:
             clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
             continued = sentence.startswith("我") and (
                 clause.startswith(("现在", "已经", "不再"))
-                or re.match(r"(?:也|还|又)?(?:特别|很|超|好|挺)?(?:不)?(?:喜欢|讨厌)", clause)
+                or re.match(
+                    r"(?:也|还|又|还是)?(?:特别|很|超|好|挺)?(?:不)?(?:喜欢|讨厌)",
+                    clause,
+                )
             )
             if continued and not clause.startswith("我"):
                 clause = "我" + clause
@@ -171,14 +190,19 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     reversal = _REVERSAL.fullmatch(sentence)
     if reversal:
         return MemoryCandidate("preference", "用户", "dislikes", reversal[1]).validated()
-    negative = re.fullmatch(r"我(?:(?:现在|已经)?不喜欢|不再喜欢|讨厌)(.+?)(?:了)?", sentence)
+    negative = re.fullmatch(
+        r"我(?:(?:现在|已经)?不喜欢|还是(?:不喜欢|讨厌)|不再喜欢|讨厌)(.+?)(?:了)?",
+        sentence,
+    )
     if negative:
         return MemoryCandidate("preference", "用户", "dislikes", negative[1]).validated()
     preference = re.fullmatch(
-        r"(?:其实)?我(?:现在)?(?:也|还|又)?(?:从小)?(?:就)?(?:一直)?(?:特别|很|超|好|挺)?喜欢(.+)",
+        r"(?:其实)?我(?:现在)?(?:也|还|又|还是)?(?:从小)?(?:就)?(?:一直)?(?:特别|很|超|好|挺)?喜欢(.+)",
         sentence,
     )
-    intense = re.fullmatch(r"(?:其实)?(?:也|还|又)?(?:特别|很|超|好|挺)喜欢(.+)", sentence)
+    intense = re.fullmatch(
+        r"(?:其实)?(?:也|还|又|还是)?(?:特别|很|超|好|挺)喜欢(.+)", sentence
+    )
     favorite = re.fullmatch(r"(?:其实)?(.+?)是我最喜欢的(?:水果|动物|食物|颜色)", sentence)
     address = re.fullmatch(r"我(?:现在住(?:在)?|住在)(.+)", sentence)
     home_address = re.fullmatch(r"我家在(.+)", sentence)
