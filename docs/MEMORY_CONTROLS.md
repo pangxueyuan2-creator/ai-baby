@@ -42,6 +42,16 @@ created since the earlier request. A punctuation-only value with an empty
 normalized representation no longer matches every unrelated episode/question.
 Linked records are still retired.
 
+Older emotion episodes contain a `用户说：` excerpt truncated to 180 characters,
+without a link to the original fact. A long fact therefore cannot always be
+found by matching its complete value. A successful `/forget` also retires **all
+legacy emotion episodes containing that marker**, including unrelated excerpts.
+This is conservative collateral cleanup, not semantic matching. New emotion
+episodes store only the interaction tone and simulated state; unrelated
+structured events and these new state-only episodes remain. Unknown IDs do not
+trigger cleanup. The entire operation rolls back together if a database write
+fails. No schema change or startup rewrite is required.
+
 **This is logical forgetting, not secure erasure.** Inactive rows remain locally
 inspectable. Existing backups, exports and data already sent to a model service
 are not erased. A fact taught again in a new turn may be learned again. The
@@ -81,3 +91,8 @@ three simulated upbringing styles at 1,000 turns each, plus 10,001 inserted fact
 state/integrity checks, not a validation of real language-model quality or
 human-like consciousness. Final cross-platform checks are recorded by the CI
 run for the maintenance commit, not inferred from an earlier green badge.
+
+`tests/test_emotion_forget_privacy.py` adds eight synthetic regression cases for
+raw-input minimization, truncated legacy excerpts from active/superseded facts,
+restart/retrieval/export/journal/provider-context cleanup, conservative scope,
+unknown IDs and rollback. Before the excerpt fix, six fail and two pass.
