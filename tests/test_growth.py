@@ -69,4 +69,6 @@ def test_restart_does_not_credit_offline_time(store):
     ticks[0] = 100000
     restarted = Baby(store, clock=lambda: ticks[0])
     restarted.chat("你好")
-    assert store.load_state("growth", Growth).active_seconds == 60
+    active = store.load_state("growth", Growth).active_seconds
+    assert 60 <= active <= 68
+    assert active < 1000

@@ -124,7 +124,11 @@ def assertion_clauses(text: str) -> list[str]:
                 continue
         for clause in re.split(r"[，,]+", sentence):
             clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
-            if sentence.startswith("我") and clause.startswith(("现在", "已经", "不再")):
+            continued = sentence.startswith("我") and (
+                clause.startswith(("现在", "已经", "不再"))
+                or re.match(r"(?:也|还|又)?(?:特别|很|超|好|挺)?(?:不)?(?:喜欢|讨厌)", clause)
+            )
+            if continued and not clause.startswith("我"):
                 clause = "我" + clause
             if any(cue in clause for cue in ("但是", "但", "不过", "虽然", "因为", "然后")):
                 continue
@@ -134,8 +138,31 @@ def assertion_clauses(text: str) -> list[str]:
     return clauses
 
 
+def split_preference_objects(value: str) -> list[str]:
+    """Split short coordinated likes/dislikes, but keep phrases that contain 的."""
+    parts = [part.strip().rstrip("。.") for part in re.split(r"(?:、|以及|还有|(?<!的)和)", value)]
+    parts = [part for part in parts if part]
+    if len(parts) >= 2 and all(1 <= len(part) <= 12 and "的" not in part for part in parts):
+        return parts
+    return [value.strip()]
+
+
+def extract_candidates(sentence: str) -> list[MemoryCandidate]:
+    """One clause may yield several preference objects after conservative splitting."""
+    extracted = extract_extended(sentence)
+    if extracted is None:
+        return []
+    if extracted.kind != "preference":
+        return [extracted]
+    return [
+        replace(extracted, value=part).validated()
+        for part in split_preference_objects(extracted.value)
+    ]
+
+
 def extract_extended(sentence: str) -> MemoryCandidate | None:
     """Anchored first-person assertions only. Ambiguous preference requires confirmation."""
+    sentence = re.sub(r"^(?:关系)[：:]\s*", "", sentence.strip())
     uncertain = re.fullmatch(
         r"(?:其实)?我(?:可能|也许|好像)(?:有点)?喜欢(.+)", sentence
     ) or re.fullmatch(r"我喜欢(.+?)吧", sentence)
@@ -151,6 +178,7 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
         r"(?:其实)?我(?:现在)?(?:也|还|又)?(?:从小)?(?:就)?(?:一直)?(?:特别|很|超|好|挺)?喜欢(.+)",
         sentence,
     )
+    intense = re.fullmatch(r"(?:其实)?(?:也|还|又)?(?:特别|很|超|好|挺)喜欢(.+)", sentence)
     favorite = re.fullmatch(r"(?:其实)?(.+?)是我最喜欢的(?:水果|动物|食物|颜色)", sentence)
     address = re.fullmatch(r"我(?:现在住(?:在)?|住在)(.+)", sentence)
     home_address = re.fullmatch(r"我家在(.+)", sentence)
@@ -160,6 +188,8 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     english_preference = _english_preference(sentence)
     if preference:
         return MemoryCandidate("preference", "用户", "likes", preference[1]).validated()
+    if intense:
+        return MemoryCandidate("preference", "用户", "likes", intense[1]).validated()
     if favorite:
         return MemoryCandidate("preference", "用户", "likes", favorite[1]).validated()
     if english_preference:

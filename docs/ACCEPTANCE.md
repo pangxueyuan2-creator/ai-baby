@@ -1,4 +1,32 @@
-# 0.3 深度维护验收
+# 维护验收记录
+
+## 本地模型设置与安全连接（2026-09-17）
+
+初始 main `aaa5a7c51ae36117cc724fafa05ac7f6e1b21b2d`：Windows / Python 3.14 的 pytest 为 **286 passed, 3 skipped**，ruff check 和 wheel/sdist 构建通过；已有 `providers/mock.py` 格式错误使 format 与 [该次 main CI](https://github.com/pangxueyuan2-creator/ai-baby/actions/runs/35201258470) 失败。PR #10 修复后从 `b5a70d8` 开始实现。期间 PR #12 合入 `7e55a7c`，其三个文件再次导致格式检查失败；本轮保留其功能，仅修正布局，并整合时间检索逻辑。
+
+新增 **114 个测试实例**。整合后的完整结果为 **407 passed, 5 skipped（62.72 秒）**；ruff check 通过，format 检查 73 个 Python 文件通过，wheel/sdist 构建通过。Windows 跳过五项 POSIX 权限 / 无符号链接权限检查，其他平台由现有 CI 矩阵执行。没有改变 SQLite schema，仍为 v3；没有修改迁移、重建宝宝或增加运行时依赖。
+
+| 验证 | 已执行的行为 |
+| --- | --- |
+| 明确发现 | fake Ollama `/api/tags`、通用 `/models`；多个 / 空列表、异常 schema、404、500、拒绝连接、慢响应头、滴流、超大 body、重定向 |
+| 网络边界 | DNS 被替换为失败函数仍可连接本机；大小写 HTTP/HTTPS/ALL/NO_PROXY 环境均指向第二 listener，实际连接数为零；GET/POST 的 302/307 不连接重定向目标；IPv6 聊天和 localhost IPv6 回退 |
+| 认证与取消 | 本机默认无 Authorization，单独显式 opt-in 后才发送项目 key；发现不发送 key；TLS 握手和响应等待可取消，原 provider 并发 / 重试 / 超时回归继续通过 |
+| 上下文 | 八条事实 / 四条经历 / 十二条历史上限，包括新学习和事件补充；虚构的 assistant 月球故事只在非证据 JSON 内，不变成事实或原生 assistant 消息 |
+| 模型切换 | mock → A → B → mock 的逻辑数据库快照；实际 fake HTTP 模型选择、失败回退、receipt 重试和重启；资料、名字、事实、经历、人格、成长、关系、日记、候选保留 |
+| 配置与 CLI | 必须选择编号；保存需确认、独占创建、不改 `.env`、拒绝覆盖 / 符号链接；不保存 key；`~` 数据目录一致；Ollama 根 URL 自动转为 `/v1`；连续失败提示抑制和恢复提示 |
+| 干净安装 | 本地克隆到中文临时路径，用真实 `start.cmd` 出生、设置、保存、重启、换模型、导出与备份；独立 venv 从 wheel 无依赖安装，在源码外启动同一宝宝，全部通过 |
+
+最终 A–H demo 全过：延迟 provider 等待 2 秒，另一个 SQLite writer 在 **10.34 ms** 完成；旧重要事件排名第一。压力脚本重新执行三种养育方式各 **1,000 轮**，最大单轮人格变化为 **0.09**，各 50 条日记且没有重复；并插入 **10,001 facts、10,001 episodes、10,000 messages**：数据库 **11,259,904 bytes**，事实检索中位 **0.253 ms**、经历检索中位 **18.943 ms**，旧重要事件仍排名第一，forget/export/integrity 检查通过。数字为本机测量，不是性能承诺。
+
+全部模型测试只使用临时合成数据和 fake loopback 服务，没有安装 Ollama、下载模型、接触真实用户数据库或调用付费 API。协议兼容测试不证明某个真实模型的角色一致性或中文质量；回环连接也不能限制本机服务继续转发云端。复现入口为下方命令，以及 `tests/test_local_*.py` 和 `tests/test_model_switching.py`。最终跨平台结果请绑定对应 PR/head 的 [Actions](https://github.com/pangxueyuan2-creator/ai-baby/actions) 查看。
+
+### 合并后 macOS 端口测试修正
+
+PR #13 的九项检查均成功，但相同代码合并后的 [macOS / Python 3.11 复验](https://github.com/pangxueyuan2-creator/ai-baby/actions/runs/35205561564/job/105150352701) 暴露一个测试假设：绑定但不监听的端口不保证在三秒期限前立即拒绝 TCP 连接，该次实际返回了安全的 `timeout`。测试改为验证不可用端口会在原期限内以 `transport` 或 `timeout` 失败；新增从 socket 注入明确 `ConnectionRefusedError` 的独立测试，严格检查真实传输链返回 `transport`、目标正确且不泄露异常细节。已有慢响应的严格 timeout 测试保留。没有增加等待时间、跳过测试、修改 provider 行为或重复重跑碰运气；此修正使本轮累计新增测试实例为 115。
+
+修正后完整本地套件为 **408 passed, 5 skipped（61.11 秒）**，共 413 个测试实例；ruff check、73 文件 format check、wheel/sdist build 均通过。运行时代码未变，前述模型切换、干净安装、A–H 与压力结果仍对应相同应用实现。
+
+## 历史：0.3 深度维护验收
 
 本轮基于 `a500a76b6a7fb5f93749bd6a21ccb302c061af32`，没有重建仓库。测试只使用虚构资料、临时数据库、mock 或回环 HTTP，不读取默认宝宝目录或调用付费 API。
 

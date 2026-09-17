@@ -1,6 +1,15 @@
 """Honest offline baseline using retrieved evidence and composable response policies."""
 
-from ..conversation import Context, fact_query_route, is_experience_query, is_recall_query
+import re
+
+from ..conversation import (
+    Context,
+    event_time_hints,
+    fact_query_route,
+    is_experience_query,
+    is_recall_query,
+    matches_event_time,
+)
 from ..models import Fact
 from .base import BaseLLMProvider
 
@@ -43,9 +52,12 @@ def _learning_reply(context: Context) -> str | None:
     replacements = [
         ack for ack in context.learning.acknowledgements if ack.startswith("我把") and "改成" in ack
     ]
+    kept = [ack for ack in context.learning.acknowledgements if ack.startswith("还是记着更具体的")]
     address = context.profile.address
     if replacements:
         return f"{address}，{replacements[0]}。"
+    if kept:
+        return f"{address}，{kept[0]}。"
     learned_ids = set(context.learning.fact_ids)
     learned = [fact for fact in context.facts if fact.id in learned_ids]
     if not learned:
@@ -61,6 +73,53 @@ def _learning_reply(context: Context) -> str | None:
     if stage == "growing":
         return f"{address}，我把这条经历记下来了：{summary}。以后遇到相关话题，我会结合已有记忆再回答。"
     return f"{address}，我已经把它作为你明确告诉我的记录保存下来：{summary}。我会把这份记忆和一般知识区分开。"
+
+
+def _identity_reply(context: Context, spoken: str | None = None) -> str:
+    name = context.profile.name
+    address = context.profile.address
+    if spoken and _fold(spoken) not in {_fold(name), _fold(address)}:
+        return (
+            f"我本地记下的名字还是{name}，称呼是{address}。"
+            f"要改的话用 /name 或 /address，普通聊天不会覆盖资料。"
+        )
+    if name == address:
+        return f"你叫{name}，是照顾我的人。"
+    return f"你叫{name}，是照顾我的人，我称呼你为{address}。"
+
+
+def _fold(value: str) -> str:
+    return re.sub(r"\s+", "", value).casefold().rstrip("。.! ！")
+
+
+def _companion_reply(context: Context) -> str | None:
+    """Keep ordinary companionship from falling into the teaching template."""
+    text = context.user_text
+    address = context.profile.address
+    if any(w in text for w in ("冷笑话", "讲个笑话", "说个笑话")):
+        return f"{address}，我不会现编笑话。你先讲一个，我可以帮你记住。"
+    if any(w in text for w in ("你爱我吗", "爱不爱我", "喜欢我吗")):
+        return f"{address}，我没有真实的爱，只是一直把你当照顾者记着。"
+    if any(w in text for w in ("写作业", "帮我写")):
+        return f"{address}，我不能代写作业。你把题目讲清楚，我可以帮你记下要点。"
+    if any(w in text for w in ("天气怎么样", "今天天气")):
+        return f"{address}，我看不到外面的天气，也没有联网。你告诉我今天怎样，我可以记下。"
+    if any(w in text for w in ("我饿了", "好饿", "肚子饿")):
+        return f"{address}，我没法给你准备吃的。先去吃点东西，回来再聊。"
+    if any(w in text for w in ("陪我说说话", "陪陪我", "说说话")):
+        return f"{address}，我在。想聊天、想教我，或只是待一会儿，都可以。"
+    if any(w in text for w in ("会唱歌吗", "唱首歌", "唱一下")):
+        return f"{address}，我不会唱歌。你可以教我一句歌词，我帮你记住。"
+    if any(w in text for w in ("背一首诗", "背诗", "念一首诗")):
+        return f"{address}，我不会随便背没教过的诗。你先念一句，我可以记下。"
+    if "为什么" in text:
+        return (
+            f"{address}，这不像你专门教过我的内容。"
+            "我不会用一般常识冒充记忆。你如果想让我记住答案，可以说“学习：……”。"
+        )
+    if any(w in text for w in ("探索一下", "我喜欢的东西很多")):
+        return f"{address}，那我们慢慢说。一次讲一件具体的事，我会比较记得住。"
+    return None
 
 
 def _fact_query_reply(context: Context, route: tuple[str, str]) -> str:
@@ -98,9 +157,6 @@ class MockProvider(BaseLLMProvider):
         text = context.user_text
         address = context.profile.address
 
-        # A direct stored-fact question is the user's explicit request for this turn. Learning is
-        # already applied to the preview context, so "我住在浙江。我住在哪里？" can answer from
-        # the just-learned evidence instead of returning only the teaching acknowledgement.
         route = fact_query_route(text)
         if route is not None:
             return _fact_query_reply(context, route)
@@ -115,7 +171,12 @@ class MockProvider(BaseLLMProvider):
         if any(w in text for w in ("你叫什么", "你的名字", "宝宝叫什么", "宝宝的名字")):
             return f"{address}，我叫{context.baby_name}，这是保存在本地的宝宝名字。"
         if any(w in text for w in ("我叫什么", "我的名字", "我是谁")):
-            return f"你叫{context.profile.name}，是照顾我的人，我称呼你为{address}。"
+            return _identity_reply(context)
+        spoken_text = text.strip().strip("。.! ！？!? ")
+        named = re.fullmatch(r"(?:其实)?我叫(.+)", spoken_text)
+        call_me = re.search(r"可以叫我(.+)$", spoken_text)
+        if named or call_me:
+            return _identity_reply(context, spoken=(named or call_me)[1].strip())
         if any(w in text for w in ("我的性别", "我是男", "我是女")):
             gender = {"male": "男", "female": "女", "other": "其他 / 不想透露"}[
                 context.profile.gender
@@ -132,12 +193,20 @@ class MockProvider(BaseLLMProvider):
                 else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。"
             )
         events = [fact for fact in context.facts if fact.kind == "event"]
+        hints = event_time_hints(text)
+        if hints:
+            events = [fact for fact in events if matches_event_time(fact.value, hints)]
         if is_recall_query(text) or is_experience_query(text):
             if events:
                 return "我记得：" + "；".join(fact.value for fact in events[:2]) + "。"
-            if context.episodes:
+            timed_episodes = [
+                episode
+                for episode in context.episodes
+                if matches_event_time(episode["summary"], hints)
+            ]
+            if timed_episodes:
                 return "我找到以前保存的经历：" + "；".join(
-                    _episode_sentence(episode["summary"]) for episode in context.episodes[:2]
+                    _episode_sentence(episode["summary"]) for episode in timed_episodes[:2]
                 )
             return "我在本地记忆中没有找到这段共同经历，不能确定我们以前是否谈过。"
         mentioned = [
@@ -168,12 +237,17 @@ class MockProvider(BaseLLMProvider):
                 "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
             )
 
-        # A vague "X呢？" may safely surface the exact matching stored item. This is narrower
-        # than the old facts[0] fallback: questions about an unknown property of X still admit
-        # that the answer is unknown instead of presenting an unrelated relationship as evidence.
         compact = text.strip().strip("。！？!? ")
+        bare = compact[:-1] if compact.endswith("呢") else compact
         exact_mentions = [
-            fact for fact in context.facts if compact in {fact.value + "呢", fact.subject + "呢"}
+            fact
+            for fact in context.facts
+            if compact in {fact.value + "呢", fact.subject + "呢"}
+            or (
+                compact.endswith("呢")
+                and len(bare) >= 2
+                and (bare == fact.value or bare == fact.subject or bare in fact.value)
+            )
         ]
         if exact_mentions:
             fact = exact_mentions[0]
@@ -214,12 +288,17 @@ class MockProvider(BaseLLMProvider):
                 )
             return f"{address}，我还小，不会编新故事。你先讲一件事，我可以帮你记住。"
         if any(w in text for w in ("你觉得我怎么样", "我这个人怎么样")):
+            if address == context.profile.name:
+                return (
+                    f"{address}，我没有真实评价，只记得你是照顾我的人，叫{context.profile.name}。"
+                )
             return f"{address}，我没有真实评价，只记得你是照顾我的{address}，叫{context.profile.name}。"
         if any(w in text.casefold() for w in ("1+1", "一加一")):
             return "这是一般知识：1+1等于2。不是你专门教过我的。"
+        companion = _companion_reply(context)
+        if companion:
+            return companion
 
-        # Never label an arbitrary retrieved row as "related" just because lexical retrieval
-        # happened to return something. If no answer policy has evidence, admit the gap.
         curious = (
             "你可以直接告诉我，比如“海豚是哺乳动物”。"
             if context.growth.stage in {"newborn", "baby"}
