@@ -41,6 +41,31 @@ def test_multi_value_friend_question_is_answered_from_relation_memory(baby):
     assert "小红" in reply
 
 
+@pytest.mark.parametrize(
+    "statement,question,expected",
+    [
+        ("小明是我同学。", "我的同学是谁？", "小明"),
+        ("王老师是我老师。", "谁是我的老师？", "王老师"),
+        ("小李是我同事。", "我有哪些同事？", "小李"),
+        ("妈妈是我家人。", "我的家人有谁？", "妈妈"),
+    ],
+)
+def test_supported_relation_questions_route_to_the_matching_predicate(
+    baby, statement, question, expected
+):
+    baby.chat(statement)
+
+    reply = baby.chat(question).text
+
+    assert expected in reply
+
+
+def test_missing_relation_question_admits_the_gap(baby):
+    reply = baby.chat("我的同学是谁？").text
+
+    assert "还没有告诉我谁是你的同学" in reply
+
+
 def test_memory_question_beats_gentle_tone_template(baby):
     baby.chat("我住在浙江。")
 
