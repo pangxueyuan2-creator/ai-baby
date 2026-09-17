@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from ai_baby.export import EXIT_OK, FORMAT_NAME, FORMAT_VERSION, build_privacy_export, write_privacy_export
+from ai_baby.export import (
+    EXIT_OK,
+    FORMAT_NAME,
+    FORMAT_VERSION,
+    build_privacy_export,
+    write_privacy_export,
+)
 from ai_baby.memory import MemoryError, MemoryStore
 from ai_baby.models import Profile
 
