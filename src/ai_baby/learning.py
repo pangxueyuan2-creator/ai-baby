@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass, field
 
-from .candidates import MemoryCandidate, extract_extended
+from .candidates import MemoryCandidate, assertion_clauses, extract_extended
 from .memory import MemoryStore
 
 
@@ -23,6 +23,9 @@ class Learner:
         self.memory = memory
 
     def process(self, text: str) -> LearningResult:
+        if not self.memory.db.in_transaction:
+            with self.memory.transaction():
+                return self.process(text)
         result = LearningResult()
         confirmation = re.fullmatch(r"确认记忆\s+(\d+)", text.strip())
         if confirmation:
@@ -37,20 +40,7 @@ class Learner:
                 self._save(candidate, result)
                 self.memory.db.execute("DELETE FROM candidates WHERE id=?", (int(confirmation[1]),))
             return result
-        for sentence in re.split(r"[。！!；;\n]+", text):
-            sentence = sentence.strip().rstrip(".")
-            if not sentence or "?" in sentence or "？" in sentence:
-                continue
-            if any(q in sentence for q in ("什么", "吗", "是否", "为什么", "哪里", "哪儿", "谁")):
-                continue
-            if sentence.startswith("我喜欢的") or "住院" in sentence:
-                continue
-            # Quoted, hypothetical, negated or uncertain personal claims are not assertions.
-            if any(
-                w in sentence
-                for w in ("“", "”", '"', "如果", "假如", "据说", "别人说", "不是说", "不确定")
-            ):
-                continue
+        for sentence in assertion_clauses(text):
             extended = extract_extended(sentence)
             if extended is not None:
                 if extended.ambiguous:
@@ -58,14 +48,7 @@ class Learner:
                         "SELECT id FROM candidates WHERE kind=? AND subject=? AND predicate=? AND value=?",
                         (extended.kind, extended.subject, extended.predicate, extended.value),
                     ).fetchone()
-                    candidate_id = (
-                        existing[0]
-                        if existing
-                        else self.memory.db.execute(
-                            "INSERT INTO candidates(kind,subject,predicate,value) VALUES(?,?,?,?)",
-                            (extended.kind, extended.subject, extended.predicate, extended.value),
-                        ).lastrowid
-                    )
+                    candidate_id = existing[0] if existing else self._propose(extended)
                     self.memory.db.execute(
                         "DELETE FROM candidates WHERE id NOT IN (SELECT id FROM candidates ORDER BY id DESC LIMIT 3)"
                     )
@@ -96,7 +79,8 @@ class Learner:
             elif relation:
                 candidate = ("relation", relation[2], relation[3], relation[1])
             elif taught:
-                fact = re.fullmatch(r"(.+?)是(.+)", taught[1])
+                # Preserve explicit negated prose instead of inventing a subject ending in 不.
+                fact = None if "不是" in taught[1] else re.fullmatch(r"(.+?)是(.+)", taught[1])
                 candidate = (
                     ("world", fact[1], "是", fact[2])
                     if fact
@@ -111,11 +95,35 @@ class Learner:
                     result.acknowledgements.append("这条知识需要更简短一些（每项最多 500 字）。")
                     continue
                 self._save(MemoryCandidate(*candidate).validated(), result)
+        if result.pending:
+            current_ids = {row[0] for row in self.memory.db.execute("SELECT id FROM candidates")}
+            result.pending = [
+                proposal for proposal in result.pending if proposal["id"] in current_ids
+            ]
         return result
 
+    def _propose(self, candidate: MemoryCandidate) -> int:
+        """Persist a monotonic proposal ID so stale confirmations cannot target new data."""
+        highest = self.memory.db.execute("SELECT coalesce(max(id),0) FROM candidates").fetchone()[0]
+        candidate_id = max(highest, int(self.memory.setting("candidate_sequence", "0"))) + 1
+        self.memory.set_setting("candidate_sequence", str(candidate_id))
+        self.memory.db.execute(
+            "INSERT INTO candidates(id,kind,subject,predicate,value) VALUES(?,?,?,?,?)",
+            (candidate_id, candidate.kind, candidate.subject, candidate.predicate, candidate.value),
+        )
+        return candidate_id
+
     def _save(self, candidate: MemoryCandidate, result: LearningResult) -> None:
-        candidate.validated()
+        candidate = candidate.validated()
         fields = (candidate.kind, candidate.subject, candidate.predicate, candidate.value)
+        # An explicit newer preference supersedes an obsolete proposal about the same object.
+        if candidate.kind == "preference":
+            for row in self.memory.db.execute(
+                "SELECT id,value FROM candidates WHERE kind='preference' AND subject=?",
+                (candidate.subject,),
+            ).fetchall():
+                if self.memory.normalize(row["value"]) == self.memory.normalize(candidate.value):
+                    self.memory.db.execute("DELETE FROM candidates WHERE id=?", (row["id"],))
         changed = self.memory.learn(*fields)
         if changed:
             result.learned += 1

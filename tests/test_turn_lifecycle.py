@@ -109,3 +109,56 @@ def test_finalize_write_failure_rolls_back_every_layer(baby, monkeypatch):
     assert not baby.memory.history()
     assert not baby.memory.facts()
     assert baby.memory.load_state("growth", Growth).interactions == 0
+
+
+def test_concurrent_same_request_commits_only_one_turn(baby):
+    rendezvous = threading.Barrier(2)
+
+    class Simultaneous(BaseLLMProvider):
+        def generate(self, context):
+            rendezvous.wait(timeout=5)
+            return "shared answer"
+
+    def run():
+        memory = MemoryStore(baby.memory.path)
+        try:
+            return Baby(memory, Simultaneous()).chat("我喜欢橘猫", turn_id="shared-id")
+        finally:
+            memory.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        replies = list(executor.map(lambda _: run(), range(2)))
+    assert replies[0] == replies[1]
+    assert baby.memory.load_state("growth", Growth).interactions == 1
+    assert len(baby.memory.history()) == 2
+    assert len(baby.memory.facts()) == 1
+
+
+def test_process_exit_during_generation_has_no_durable_preview(baby):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    revision = baby.memory.revision()
+    script = """
+import os, sys
+from pathlib import Path
+from ai_baby.baby import Baby
+from ai_baby.memory import MemoryStore
+from ai_baby.providers import BaseLLMProvider
+class Crash(BaseLLMProvider):
+    def generate(self, context):
+        os._exit(24)
+Baby(MemoryStore(Path(sys.argv[1])), Crash()).chat('我喜欢橘猫', turn_id='crashed')
+"""
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1] / "src"))
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(baby.memory.path)], env=env, timeout=15
+    )
+    assert result.returncode == 24
+    assert baby.memory.revision() == revision
+    assert not baby.memory.history()
+    assert not baby.memory.facts()
+    assert baby.memory.load_state("growth", Growth).interactions == 0
+    assert baby.memory.db.execute("PRAGMA quick_check").fetchone()[0] == "ok"

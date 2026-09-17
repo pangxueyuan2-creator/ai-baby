@@ -1,6 +1,6 @@
-# Architecture — 0.2
+# Architecture — 0.3
 
-AI Baby retains the 0.1 CLI, SQLite stores and replaceable provider boundary. This release changes turn consistency and adds small, separate domain modules; it does not train model weights. Every personality, relationship and emotion value is a **software simulation**.
+AI Baby retains the original CLI, SQLite stores, replaceable provider boundary and 0.2 optimistic turn lifecycle. This maintenance release strengthens forgotten-request handling, migrations, correction semantics and provider cancellation; it does not train model weights. Every personality, relationship and emotion value is a **software simulation**.
 
 ## One turn: preview, generate, compare-and-commit
 
@@ -31,9 +31,13 @@ input
 
 This deliberately trades two short local transitions per turn for a simple consistency contract. Network latency, backoff and provider deadlines never extend a SQLite write transaction. SQL, validation and retrieval remain inside the short local phase. Huge databases can still make local phases slower; keyword indexes and bounded result sets limit work, but this is not a distributed high-throughput service.
 
+Calling `Baby.chat()` inside an existing database transaction is rejected before generation. Top-level `transaction()` / `preview()` reject nesting without rolling back the caller's unrelated work. Standalone `MemoryStore.learn()` and `episode()` use savepoints so a failed token-index write cannot leave a partially replaced fact or unindexed episode. Public backup rejects an active transaction rather than blocking its own writer indefinitely.
+
 ### Concurrent instances
 
-Schema v2 maintains a monotonic `revision` row. INSERT / UPDATE / DELETE triggers on authoritative tables increment it, including direct SQL writes. The transaction rolls increments back with their data. Index-only tables and receipt bookkeeping are not independent domain state.
+Schema v3 retains the v2 monotonic `revision` row. INSERT / UPDATE / DELETE triggers on authoritative tables increment it, including direct SQL writes. The transaction rolls increments back with their data. Index-only tables and receipt bookkeeping are not independent domain state. Opening a store validates required schema fields, the revision row and required trigger presence instead of silently operating without concurrency protection.
+
+Connections enable foreign keys and use a two-second SQLite busy timeout. The application does not change a user's journaling mode or require WAL. WAL can help readers coexist with a writer, but still allows only one writer and does not solve a write lock held over network I/O. Keeping short transactions addresses this project's current contention problem without changing existing database side-file behavior.
 
 If another instance changes the baby during generation, finalization raises `TurnConflict`. **No part of the losing turn is saved**: no duplicate user message, lost relationship update, candidate, or orphaned learning event. The CLI explains that the user should inspect the new state and submit again. There is no automatic model re-generation on conflict, avoiding hidden requests and cost. A change to profile, journal, baby name or forgotten facts also invalidates an older context.
 
@@ -43,24 +47,30 @@ External services may already have received the losing turn's context. Database 
 
 `Baby.chat(text, turn_id="caller-generated-id")` retains the last 256 successful receipts. Reusing an ID and identical input returns the stored reply without another provider call or state update. Reusing an ID for different text is rejected. The CLI creates a new ID for every intentional input; repeated text is not automatically treated as a transport retry. Receipts outside the retention window cannot be deduplicated.
 
+`/forget` clears cached answer bodies and marks retained receipts `revoked`. A replay of a revoked ID is rejected before learning or generation, rather than resurrecting a forgotten fact. These tombstones retain IDs and input digests, not the original text, within the same 256-receipt window. They are not permanent erase requests: an evicted ID cannot be recognized, and a new intentional request can teach the same fact again.
+
 An unexpected plugin bug, Ctrl+C, failed COMMIT or full disk does not leave a partial local turn. A crash between provider completion and commit loses that uncommitted turn; the application never claimed it was saved. This is intentional instead of leaving durable half-finished turns or unsafe automatic restart retries.
 
 ## Database versioning
 
-`migrations.initialize()` reads `PRAGMA user_version`. Fresh empty databases receive the frozen v1 base schema and then the v2 migration in one transaction. Unknown nonempty unversioned databases and future versions are rejected.
+`migrations.initialize()` reads `PRAGMA user_version`. Fresh empty databases receive the frozen v1 base schema and then registered v2 / v3 migrations in one transaction. Unknown nonempty unversioned databases and future versions are rejected.
 
-For existing v1 databases:
+For existing v1 or v2 databases:
 
 1. Acquire `BEGIN IMMEDIATE`, re-read the version (another opener may already have migrated).
-2. Create `backups/pre-v1-to-v2-<UTC timestamp>.sqlite3` via SQLite's backup API using a separate read-only connection. The writer reservation prevents concurrent changes while this consistent pre-migration snapshot is made. Using `backup()` on the same write transaction would deadlock, so it is deliberately not used.
+2. Create `backups/pre-v<old>-to-v3-<UTC timestamp>.sqlite3` via SQLite's backup API using a separate read-only connection. The writer reservation prevents concurrent changes while this consistent pre-migration snapshot is made. Using `backup()` on the same write transaction would deadlock, so it is deliberately not used.
 3. Apply individual transactional DDL / backfill statements. Do not use `executescript()` inside migrations because it can commit implicitly.
-4. Run foreign-key validation, set version 2 and commit together.
+4. Run foreign-key and required schema / revision / trigger validation, set version 3 and commit together.
 
-Backup failure prevents migration. Migration failure rolls back both schema and data and leaves the v1 file and pre-migration backup available. Existing `profile`, facts, episodes, relationship, emotion and legacy `Growth` JSON are preserved. New personality defaults are added without rewriting the legacy growth state or demoting its stage. `GrowthMetrics` is initialized from current data at the next successful turn; legacy mixed `knowledge` is not blindly treated as world knowledge.
+Backup failure prevents migration. Migration failure rolls back both schema and data and leaves the old file and pre-migration backup available. Existing profile, facts, episodes, relationship, emotion, personality, journals and legacy `Growth` JSON are preserved. Migrating v1 adds personality defaults without rewriting legacy growth or demoting its stage. `GrowthMetrics` is refreshed from current data at the next successful turn; legacy mixed `knowledge` is not blindly treated as world knowledge.
 
-`MIGRATIONS` is an ordered registry. Future changes must add a new migration and a frozen previous-version fixture, not edit an already released migration. Tests create actual v1 files from `tests/fixtures/v1.sql`, copied from commit `c4871b8`; no user database is shipped.
+`MIGRATIONS` is an ordered registry. Future changes must add a new migration and a frozen previous-version fixture, not edit an already released migration. Tests create actual v1 files from `tests/fixtures/v1.sql`, copied from commit `c4871b8`, and frozen v2 fixtures. Failure tests include a process exiting during migration so SQLite recovery is exercised across a real connection restart; no user database is shipped.
 
-Compatibility note: the importance column uses an integer SQL default during `ALTER TABLE`, followed by an explicit `0.4` backfill. This retains NOT NULL and range checks while avoiding [older SQLite's floating-default integrity-check bug](https://sqlite.org/forum/forumpost/ee4f6fa5ab), exposed by the Linux/macOS migration CI. Databases that already migrated successfully remain readable without another upgrade.
+The new v3 migration adds `turn_receipts.revoked`, fact-associated episode / curiosity indexes, and an `(active,id)` episode index. It retires episodes and questions linked to already inactive facts. It seeds `candidate_sequence` from both existing candidate IDs and any existing sequence; already-deleted pre-upgrade IDs cannot be recovered. Released v1 / v2 migrations remain unchanged.
+
+New databases, backups and exports use exclusive creation with POSIX mode `0600`; on Windows they inherit the directory ACL. Existing files and permissions remain unchanged. These permissions do not protect data from other programs running as the same user or an attacker controlling the data directory.
+
+Compatibility note: the importance column uses an integer SQL default during `ALTER TABLE`, followed by an explicit `0.4` backfill. This retains NOT NULL and range checks while avoiding [older SQLite's floating-default integrity-check bug](https://sqlite.org/forum/forumpost/ee4f6fa5ab), exposed by the Linux/macOS migration CI. That released v2 fix remains unchanged; existing v2 files receive only the new v3 migration.
 
 ## Memory and retrieval
 
@@ -78,9 +88,11 @@ The existing layers remain separate. Additional v2 tables:
 | `curiosity` | At most three pending questions and compact asked-topic history |
 | `experience` | Unique category / signature pairs for diversity accounting |
 | `settings` | Baby name and local journal / curiosity cursors |
-| `revision`, `turn_receipts` | Concurrency and bounded retry deduplication |
+| `revision`, `turn_receipts` | Concurrency and bounded retry deduplication, including revoked IDs |
 
 Episode retrieval ranks indexed token overlap (`sum(token_length²)`) plus `6 × importance` plus a recency bonus no larger than 1. Recency decays on a 30-day scale. Relevant old events can outrank recent irrelevant ones; results are not selected by newest IDs alone. This is lexical relevance, not semantic embeddings or human autobiographical memory.
+
+Questions about shared history additionally remove recall boilerplate and require a matching topic of at least two characters. Common pronouns alone cannot substantiate a claimed memory. This conservative filter can miss a vague or single-character topic; the user may need to name the event more specifically.
 
 Provider context remains bounded: 8 facts, 4 episodes, 12 recent dialogue messages (1,200 characters each), up to three pending candidate descriptions, one optional curiosity question, fixed identity and current state. There is no whole-database prompt. The underlying retrieval table may grow; exports deliberately include the user's full active data and are not subject to prompt limits.
 
@@ -88,9 +100,13 @@ Provider context remains bounded: 8 facts, 4 episodes, 12 recent dialogue messag
 
 `MemoryCandidate` validates type, subject, predicate and field lengths locally. The learner retains original explicit teaching syntax and adds anchored first-person preference, residence and friend-name statements. It does not infer gender, health conditions or identity from everyday activity.
 
-An uncertain phrase such as “我可能喜欢橘猫” creates only a proposal and an explicit `/confirm ID` question. `/reject ID` discards it; `/candidates` lists pending proposals. Proposals are persisted locally for restart recovery but excluded from factual recall and the confirmed-data export. They are sent only as clearly marked *unconfirmed* data when external generation is explicitly enabled. Confirmation revalidates the proposal before saving it. Unknown, quoted, hypothetical or unsupported phrases do not become facts.
+The supported correction grammar handles explicit present preference reversals, including “我以前喜欢橘猫，现在不喜欢了”; unsupported temporal qualifiers are rejected rather than swallowed into an object. Compatible personal clauses can be split while preserving uncertainty / question scope. Multiple friends coexist. Changed single-valued world / personal facts and opposite preferences retire their old linked episodes and questions. Old rows remain for audit; ordinary corrections do not erase all recent dialogue or old journals. Explicit prose knowledge notes count as world knowledge alongside structured teaching, not as personal memories.
+
+An uncertain phrase such as “我可能喜欢橘猫” creates only a proposal and an explicit `/confirm ID` question. `/reject ID` discards it; `/candidates` lists pending proposals. Proposals are persisted locally for restart recovery but excluded from factual recall and the confirmed-data export. They are sent only as clearly marked *unconfirmed* data when external generation is explicitly enabled. Confirmation revalidates the proposal before saving it. A durable monotonic sequence prevents a stale confirmation from targeting a newly reused ID; a newer explicit preference removes a conflicting old proposal for the same object. Unknown, quoted, hypothetical or unsupported phrases do not become facts.
 
 There is no LLM extraction in this release. Generated text is never parsed as database instructions. The provider interface offers no database or tool handle. Third-party Python provider implementations are trusted local code, not sandboxed programs; install only code you trust. Prompt isolation alone cannot guarantee an external model's behavior.
+
+Context labels memories as `user_taught` / `user_statement` and episodes as `user_recorded` / `software_event`. The fixed prompt requires model-general knowledge to be identified separately and forbids treating older assistant replies as evidence of shared experiences. This strengthens source separation without claiming that prompt instructions can eliminate external-model hallucinations.
 
 ## Development stage versus personality
 
@@ -111,20 +127,22 @@ All values are 0–100, initially 50 except curiosity 70. Each change is bounded
 
 Growth metrics separate world knowledge, personal memories, episodes, relationship depth, interaction diversity, active seconds, important events and knowledge diversity. World-knowledge novelty and category breadth gate advancement. Duplicate facts produce no new learning episodes; digit / punctuation variants share a novelty key; per-dimension saturation limits reward. Arbitrary semantically meaningless but lexically varied assertions can still evade this heuristic. There is no truth detector or claim of spam-proof intelligence.
 
+Current stage gates intentionally require teaching: a baby that only chats may remain newborn while its personality and relationships continue evolving. Relationship changes now diminish near the relevant boundary, preventing a few hundred repeated praise turns from maxing every field, while allowing subsequent opposite experiences to change them. Tone hints conservatively ignore supported negated, quoted, hypothetical and reported statements; they do not solve general sarcasm or language understanding.
+
 ## Journals and proactive questions
 
-Every 20 successful turns, `/journal`, or clean `/quit`, consolidation selects at most six important new episodes and compares personality to the preceding journal snapshot. It writes a bounded 1,200-character deterministic software-state entry. Interactions without new events can still produce an entry about personality changes. Repeated `/journal` without new turns / episodes does not duplicate entries. A journal is not fed back as new growth evidence.
+Every 20 successful turns, `/journal`, or clean `/quit`, consolidation selects at most six important new episodes and compares personality to the preceding written journal snapshot. Each selected episode receives a 120-character excerpt budget, keeping later excerpts and personality changes inside the final 1,200-character bound. Unselected details remain in episodes. Interactions without new events can still produce an entry about personality changes; an unchanged interval only advances checkpoints. Sub-threshold personality changes accumulate against the last written snapshot. Repeated `/journal` without new turns / episodes does not duplicate entries. A journal is not fed back as new growth evidence.
 
-Curiosity can schedule one question after at least six turns, then no more than once per eight turns, only on suitable newly learned facts. Young stages ask simple examples; later stages ask about connections and changed perspectives. A durable topic hash prevents re-asking. Explicit “因为…” / “回答：…” resolves the latest pending question; “不想回答” / “跳过问题” ignores it. Other replies need not resolve it and are not punished. At most three question texts remain pending; resolved topics retain minimal hashes for deduplication. This conservative handling is not unrestricted natural-language answer understanding.
+Curiosity can schedule one question after at least six turns, then no more than once per eight turns, only on suitable newly learned facts. Young stages ask simple examples; later stages connect to an actual earlier retrieved fact or ask a question without presupposing a past lesson. Generic offline greetings do not independently append routine questions; clarification and support can still require a question. A durable topic hash prevents re-asking. Explicit “因为…” / “回答：…” resolves the latest pending question; “不想回答” / “跳过问题” ignores it. Other replies need not resolve it and are not punished. At most three question texts remain pending; resolved topics retain minimal hashes for deduplication. This conservative handling is not unrestricted natural-language answer understanding.
 
 ## User control and provider failure modes
 
-`/forget ID` marks a fact and directly linked / matching episodes inactive. It also clears recent dialogue, cached replies, pending candidates and journals so those secondary copies cannot revive the fact. This intentionally conservative cleanup is explained before use in help and README. Metrics are refreshed; past developmental stage and personality do not regress. Inactive rows and previous backups remain on disk: **this is recall suppression, not secure erasure**.
+`/forget ID` marks an active fact and directly linked / normalized-content-matching episodes inactive. Matching question text is cleared, including a question associated with another fact. It also clears recent dialogue, cached answer bodies, pending candidates and journals so those secondary copies cannot revive the fact. Receipt identities become revoked tombstones, as described above. Metrics are refreshed; past developmental stage and personality do not regress. Inactive rows, input digests and previous backups remain on disk: **this is recall suppression, not secure erasure**. Other independent facts are not a semantic dependency graph, and re-teaching can intentionally save the same information again.
 
 `/export` writes a new human-readable JSON under `data-dir/exports/` using an explicit field allowlist and a consistent read transaction. It excludes configuration, keys, environment files, raw dialogue, unconfirmed candidates and inactive facts. All active facts, important episodes, state and journals may contain personal information. It refuses to overwrite files. `/reset` is not implemented; an independent `--data-dir` safely creates another baby.
 
-External requests still require explicit provider selection and opt-in. HTTPS is required except loopback endpoints; loopback services may omit Authorization entirely or use a user-provided dummy key. `store=false` and no-follow-redirect behavior remain. Retry defaults to zero and is configurable to at most two retries, only for explicit HTTP 429 rejection. No retries occur for auth errors, 5xx, redirects, malformed responses, connection loss or ambiguous timeouts. Backoff is bounded to two seconds and cancelled with the caller.
+External requests still require explicit provider selection and opt-in. HTTPS is required except loopback endpoints; loopback services may omit Authorization entirely or use a user-provided dummy key. Loopback requests explicitly bypass system proxies. `store=false` and no-follow-redirect behavior remain. Retry defaults to zero and is configurable to at most two retries, only for explicit HTTP 429 rejection. No retries occur for auth errors, 5xx, redirects, malformed responses, connection loss or ambiguous timeouts. Backoff is bounded to two seconds and cancelled with the caller.
 
-The provider has a total caller deadline and a single daemon transport worker. The caller polls every 50 ms, making Ctrl+C responsive even when the underlying platform socket call blocks. A timed-out/cancelled request may finish at the service; its result is ignored, it has no database access, and no further retries are scheduled. Until that worker exits, another request on the same provider falls back with a `busy` classification. This bounds worker accumulation. Socket-level timeouts still apply, but Python cannot forcibly terminate a thread or retract a request. Streaming is deliberately deferred.
+The provider has a total caller deadline and a single admitted daemon transport worker. A lock covers both admission and `Thread.start()`, avoiding a concurrent check/start race. The caller polls every 50 ms. Cancellation shuts down tracked sockets to wake stalled response-header and body reads, including slow-drip responses; proxy CONNECT sockets are tracked too. Name resolution / connection establishment and TLS handshake have platform or socket-timeout limits and may not terminate immediately. A timed-out/cancelled request may finish at the service; its result is ignored, it has no database access, and no further retries are scheduled. Until that worker exits, another request on the same provider falls back with `busy`. Python cannot forcibly terminate a thread or retract a request. Streaming is deliberately deferred.
 
 Errors exposed to CLI/logs are categories, not provider bodies, user text or keys. Baseline and new tests use fake identities, temporary files and local HTTP only; real paid-model quality remains unverified.

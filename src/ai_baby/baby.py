@@ -71,7 +71,12 @@ class Baby:
         profile = self.memory.profile()
         if profile is None:
             raise ValueError("请先完成出生流程。")
-        return f"{profile.address}，你回来啦。我记得你叫{profile.name}。"
+        return f"{profile.address}，你回来啦。我是{self.name}，我记得你叫{profile.name}。"
+
+    @property
+    def name(self) -> str:
+        """The persisted display name, also validated when read from an older store."""
+        return clean_text(self.memory.setting("baby_name", "AI 宝宝"), 80)
 
     def change_profile(self, name: str | None = None, address: str | None = None) -> Profile:
         with self.memory.transaction():
@@ -133,12 +138,14 @@ class Baby:
 
     def _receipt(self, turn_id: str, digest: str) -> Reply | None:
         row = self.memory.db.execute(
-            "SELECT digest,answer,warning FROM turn_receipts WHERE id=?", (turn_id,)
+            "SELECT digest,answer,warning,revoked FROM turn_receipts WHERE id=?", (turn_id,)
         ).fetchone()
         if row is None:
             return None
         if row["digest"] != digest:
             raise ValueError("同一个 turn_id 不能用于不同输入。")
+        if row["revoked"]:
+            raise ValueError("这轮请求已因遗忘而撤销；不会重放或恢复旧记忆。")
         return Reply(row["answer"], row["warning"])
 
     def chat(self, text: str, *, turn_id: str | None = None) -> Reply:

@@ -36,7 +36,8 @@ def test_real_http_transport_keeps_identity_memory_and_stage(baby, tmp_path, api
     assert data["growth"]["stage"] == "newborn"
     assert data["development_traits"]["curiosity"] == 0.95
     assert 70 <= data["personality"]["curiosity"] < 71
-    assert data["relevant_user_taught_memories"][0]["value"] == "草莓"
+    assert data["relevant_memories"][0]["value"] == "草莓"
+    assert data["relevant_memories"][0]["provenance"] == "user_statement"
     assert messages[-1]["content"] == "我喜欢什么？"
 
 

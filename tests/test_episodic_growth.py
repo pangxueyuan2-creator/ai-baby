@@ -63,3 +63,12 @@ def test_duplicate_experience_does_not_increase_diversity(store):
         for _ in range(1000):
             store.experience("neutral", "你好")
     assert store.db.execute("SELECT count(*) FROM experience").fetchone()[0] == 1
+
+
+def test_explicit_prose_teaching_counts_as_knowledge_without_counting_preferences(baby):
+    baby.chat("知识：地球围绕太阳运行。学习：海豚不是鱼。")
+    baby.chat("我喜欢草莓")
+    metrics = baby.memory.growth_metrics(Relationship(), 0)
+    assert metrics.world_knowledge == baby.memory.counts()["knowledge"] == 2
+    assert metrics.knowledge_diversity == 2
+    assert metrics.personal_memories == 1

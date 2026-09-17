@@ -1,6 +1,7 @@
 """User-directed memory controls, separate from language generation."""
 
 import json
+import os
 from pathlib import Path
 
 from .memory import MemoryStore
@@ -17,15 +18,30 @@ def forget(memory: MemoryStore, fact_id: int) -> bool:
         cursor = memory.db.execute("UPDATE facts SET active=0 WHERE id=? AND active=1", (fact_id,))
         if cursor.rowcount == 0:
             return False
-        memory.db.execute(
-            "UPDATE episodes SET active=0 WHERE fact_id=? OR instr(summary,?)>0", (fact_id, fact[0])
-        )
+        normalized = memory.normalize(fact[0])
+        memory.db.execute("UPDATE episodes SET active=0 WHERE fact_id=?", (fact_id,))
+        # Forget is an infrequent explicit operation. A normalized pass also finds
+        # case/whitespace variants in unlinked v1 or emotional summaries.
+        episode_ids = [
+            (row["id"],)
+            for row in memory.db.execute("SELECT id,summary FROM episodes WHERE active=1")
+            if normalized in memory.normalize(row["summary"])
+        ]
+        memory.db.executemany("UPDATE episodes SET active=0 WHERE id=?", episode_ids)
         memory.db.execute(
             "UPDATE curiosity SET status='ignored',question='' WHERE fact_id=?", (fact_id,)
         )
+        topics = [
+            (row["topic"],)
+            for row in memory.db.execute("SELECT topic,question FROM curiosity WHERE question!=''")
+            if normalized in memory.normalize(row["question"])
+        ]
+        memory.db.executemany(
+            "UPDATE curiosity SET status='ignored',question='' WHERE topic=?", topics
+        )
         # Conservative privacy: old dialogue/summaries must not resurrect forgotten content.
         memory.db.execute("DELETE FROM messages")
-        memory.db.execute("DELETE FROM turn_receipts")
+        memory.db.execute("UPDATE turn_receipts SET revoked=1,answer='',warning=NULL")
         memory.db.execute("DELETE FROM candidates")
         memory.db.execute("DELETE FROM journals")
         memory.set_setting("journal_cursor", "0")
@@ -78,7 +94,8 @@ def export_data(memory: MemoryStore, destination: Path) -> None:
         memory.db.execute("ROLLBACK")
     destination.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation prevents accidental overwrite. A failed write removes only our file.
-    with destination.open("x", encoding="utf-8") as output:
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
         try:
             json.dump(payload, output, ensure_ascii=False, indent=2)
             output.write("\n")

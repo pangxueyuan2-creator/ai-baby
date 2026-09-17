@@ -79,6 +79,10 @@ def command(baby: Baby, text: str) -> bool:
     """Run a local command. Return false only for explicit exit."""
     name, _, argument = text.partition(" ")
     memory = baby.memory
+    if name in {"/forget", "/confirm", "/reject"} and (
+        not argument.isascii() or not argument.isdecimal() or not 0 < int(argument) < 2**63
+    ):
+        raise ValueError("请提供有效的正整数记忆 ID；先用 /memories 或 /candidates 查看。")
     if name in {"/quit", "/exit"}:
         with memory.transaction():
             journal.consolidate(memory, force=True)
@@ -130,7 +134,7 @@ def command(baby: Baby, text: str) -> bool:
             else "没有找到有效的事实 ID。"
         )
     elif name == "/confirm":
-        print("AI 宝宝：" + baby.chat(f"确认记忆 {int(argument)}").text)
+        print(baby.name + "：" + baby.chat(f"确认记忆 {int(argument)}").text)
     elif name == "/candidates":
         rows = memory.db.execute(
             "SELECT id,kind,subject,predicate,value FROM candidates ORDER BY id DESC LIMIT 3"
@@ -177,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         if memory.profile() is None:
             onboarding(baby)
         else:
-            print("AI 宝宝：" + baby.greeting())
+            print(baby.name + "：" + baby.greeting())
         print("输入 /help 查看命令，/quit 退出。每轮自动保存。")
         while True:
             text = input("你 > ").strip()
@@ -192,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
                 reply = baby.chat(text)
                 if reply.warning:
                     print(safe_output(reply.warning))
-                print("AI 宝宝：" + reply.text)
+                print(baby.name + "：" + reply.text)
             except (ValueError, TurnConflict) as exc:
                 print(safe_output(str(exc)))
             except sqlite3.OperationalError:

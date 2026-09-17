@@ -156,6 +156,7 @@ def test_curiosity_sparse_no_penalty_and_no_repeat(baby):
 
 
 def test_curiosity_answered_and_mature_question(baby):
+    baby.chat("学习：鲸鱼是哺乳动物")
     baby.memory.save_state("growth", Growth(interactions=10, stage="mature"))
     baby.memory.save_state("personality", PersonalityState(curiosity=80))
     reply = baby.chat("学习：海豚是哺乳动物")

@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
 from .migrations import SCHEMA_VERSION as SCHEMA_VERSION
-from .migrations import initialize
+from .migrations import initialize, validate_schema
 from .migrations.v2 import novelty_key
-from .models import Fact, Profile, record
+from .models import Fact, Profile, clean_text, record
+from .storage_files import reserve_private_file
 
 T = TypeVar("T")
 
@@ -69,12 +70,17 @@ class MemoryStore:
         self.connection: sqlite3.Connection | None = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                reserve_private_file(path)
+            except FileExistsError:
+                pass  # Existing file permissions and data belong to the user.
             self.connection = sqlite3.connect(path, timeout=2, isolation_level=None)
             self.connection.row_factory = sqlite3.Row
             self.connection.execute("PRAGMA foreign_keys=ON")
             if self.connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise MemoryError("数据库完整性检查未通过。")
             initialize(self.connection, path, SCHEMA)
+            validate_schema(self.connection)
         except (sqlite3.Error, OSError, ValueError, RuntimeError) as exc:
             self.close()
             raise MemoryError(
@@ -91,6 +97,8 @@ class MemoryStore:
     @contextmanager
     def transaction(self) -> Iterator[None]:
         """Serialize state updates and roll back the entire turn on failure."""
+        if self.db.in_transaction:
+            raise ValueError("不能嵌套聊天事务。")
         try:
             self.db.execute("BEGIN IMMEDIATE")
             yield
@@ -103,12 +111,27 @@ class MemoryStore:
     @contextmanager
     def preview(self) -> Iterator[None]:
         """Evaluate local effects under a short lock, always rolling them back."""
+        if self.db.in_transaction:
+            raise ValueError("不能在已有事务中生成回复。")
         self.db.execute("BEGIN IMMEDIATE")
         try:
             yield
         finally:
             if self.db.in_transaction:
                 self.db.execute("ROLLBACK")
+
+    @contextmanager
+    def _atomic_write(self) -> Iterator[None]:
+        """Make multi-statement store methods atomic, also within an enclosing turn."""
+        self.db.execute("SAVEPOINT memory_write")
+        try:
+            yield
+            self.db.execute("RELEASE memory_write")
+        except BaseException:
+            if self.db.in_transaction:
+                self.db.execute("ROLLBACK TO memory_write")
+                self.db.execute("RELEASE memory_write")
+            raise
 
     def revision(self) -> int:
         return self.db.execute("SELECT value FROM revision WHERE id=1").fetchone()[0]
@@ -184,6 +207,14 @@ class MemoryStore:
 
     def learn(self, kind: str, subject: str, predicate: str, value: str) -> bool:
         """Deduplicate; opposing preferences and changed single-valued facts supersede."""
+        kind, subject, predicate, value = (
+            clean_text(field, 500) for field in (kind, subject, predicate, value)
+        )
+        with self._atomic_write():
+            return self._learn(kind, subject, predicate, value)
+
+    def _learn(self, kind: str, subject: str, predicate: str, value: str) -> bool:
+        """Apply one validated assertion inside a savepoint owned by learn()."""
         normalized = self.normalize(value)
         old = self.db.execute(
             "SELECT id,active FROM facts WHERE kind=? AND subject=? AND predicate=? AND normalized=?",
@@ -197,11 +228,23 @@ class MemoryStore:
                 "UPDATE facts SET active=0 WHERE kind=? AND subject=? AND predicate=? AND normalized=?",
                 (kind, subject, opposite, normalized),
             )
-        elif kind in {"personal", "world", "relation"}:
+        elif kind in {"personal", "world"}:
             self.db.execute(
                 "UPDATE facts SET active=0 WHERE kind=? AND subject=? AND predicate=?",
                 (kind, subject, predicate),
             )
+        # A changed assertion must not survive as a current learning episode/question.
+        # Relations (friends, colleagues, siblings) are multi-valued unless explicitly forgotten.
+        self.db.execute(
+            "UPDATE episodes SET active=0 WHERE active=1 AND fact_id IN "
+            "(SELECT id FROM facts WHERE kind=? AND subject=? AND active=0)",
+            (kind, subject),
+        )
+        self.db.execute(
+            "UPDATE curiosity SET status='ignored',question='' WHERE status='pending' "
+            "AND fact_id IN (SELECT id FROM facts WHERE kind=? AND subject=? AND active=0)",
+            (kind, subject),
+        )
         if old:
             fact_id = old["id"]
             self.db.execute("UPDATE facts SET active=1 WHERE id=?", (fact_id,))
@@ -261,9 +304,7 @@ class MemoryStore:
 
         counts = self.counts()
         return GrowthMetrics(
-            world_knowledge=self.db.execute(
-                "SELECT count(*) FROM facts WHERE active=1 AND kind='world'"
-            ).fetchone()[0],
+            world_knowledge=counts["knowledge"],
             personal_memories=self.db.execute(
                 "SELECT count(*) FROM facts WHERE active=1 AND kind IN ('preference','personal','relation')"
             ).fetchone()[0],
@@ -275,7 +316,8 @@ class MemoryStore:
             active_seconds=active_seconds,
             important_events=counts["events"],
             knowledge_diversity=self.db.execute(
-                "SELECT count(DISTINCT novelty) FROM facts WHERE active=1 AND kind='world' AND length(novelty)>=3"
+                "SELECT count(DISTINCT novelty) FROM facts WHERE active=1 "
+                "AND kind IN ('world','knowledge') AND length(novelty)>=3"
             ).fetchone()[0],
         )
 
@@ -318,15 +360,17 @@ class MemoryStore:
             )
         if not math.isfinite(importance) or not 0 <= importance <= 1:
             raise ValueError("importance 必须是 0–1。")
-        summary = summary[:500]
-        cursor = self.db.execute(
-            "INSERT INTO episodes(kind,summary,importance,fact_id) VALUES(?,?,?,?)",
-            (kind, summary, importance, fact_id),
-        )
-        self.db.executemany(
-            "INSERT INTO episode_tokens VALUES(?,?)",
-            [(t, cursor.lastrowid) for t in tokens(summary)],
-        )
+        kind = clean_text(kind, 80)
+        summary = clean_text(summary[:500], 500)
+        with self._atomic_write():
+            cursor = self.db.execute(
+                "INSERT INTO episodes(kind,summary,importance,fact_id) VALUES(?,?,?,?)",
+                (kind, summary, importance, fact_id),
+            )
+            self.db.executemany(
+                "INSERT INTO episode_tokens VALUES(?,?)",
+                [(t, cursor.lastrowid) for t in tokens(summary)],
+            )
 
     def episodes(self, limit: int = 4) -> list[dict[str, Any]]:
         return [
@@ -364,9 +408,10 @@ class MemoryStore:
 
     def backup(self, destination: Path) -> None:
         """Use SQLite's consistent backup API; never overwrite an existing file."""
+        if self.db.in_transaction:
+            raise ValueError("请在当前事务结束后创建备份。")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("xb"):
-            pass
+        reserve_private_file(destination)
         try:
             target = sqlite3.connect(destination)
             try:

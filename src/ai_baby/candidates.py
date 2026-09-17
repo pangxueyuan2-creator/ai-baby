@@ -1,7 +1,7 @@
 """Validated, explicit memory proposals. No model inference of personal attributes."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .models import clean_text
 
@@ -19,25 +19,109 @@ class MemoryCandidate:
         allowed = {"preference", "personal", "world", "relation", "knowledge", "event"}
         if self.kind not in allowed:
             raise ValueError("未知记忆类型。")
-        for value in (self.subject, self.predicate, self.value):
-            clean_text(value, 500)
+        if any(not isinstance(value, str) for value in (self.subject, self.predicate, self.value)):
+            raise ValueError("记忆内容必须是文本。")
+        candidate = replace(
+            self,
+            subject=clean_text(self.subject, 500),
+            predicate=clean_text(self.predicate, 500),
+            value=clean_text(self.value, 500),
+        )
         if self.kind == "preference" and (
-            self.subject != "用户" or self.predicate not in {"likes", "dislikes"}
+            candidate.subject != "用户" or candidate.predicate not in {"likes", "dislikes"}
         ):
             raise ValueError("偏好候选格式无效。")
         if self.kind == "personal" and (
-            self.subject != "用户" or self.predicate not in {"居住地", "生日", "职业"}
+            candidate.subject != "用户" or candidate.predicate not in {"居住地", "生日", "职业"}
         ):
             raise ValueError("个人资料候选格式无效。")
-        return self
+        return candidate
+
+
+_REVERSAL = re.compile(
+    r"我(?:以前|曾经)?喜欢([^，,]+)[，,]\s*(?:但是|但)?(?:我)?(?:现在|已经)不喜欢(?:了)?"
+)
+_QUESTIONS = ("?", "？", "什么", "吗", "是否", "哪里", "哪儿", "谁", "是不是", "对不对", "还是")
+_NON_ASSERTIONS = (
+    "“",
+    "”",
+    '"',
+    "‘",
+    "’",
+    "如果",
+    "假如",
+    "假设",
+    "据说",
+    "别人说",
+    "他说",
+    "她说",
+    "你说",
+    "不是说",
+    "不确定",
+    "未必",
+    "不一定",
+    "例如",
+    "比如",
+    "例句",
+)
+
+
+def assertion_clauses(text: str) -> list[str]:
+    """Split explicit clauses without stripping the scope of questions or hypotheticals.
+
+    This is a small supported grammar, not general Chinese language understanding.
+    Unknown temporal qualifiers are rejected instead of becoming part of a fact value.
+    """
+    clauses = []
+    for sentence in re.split(r"[。！!；;\n]+", text):
+        sentence = sentence.strip().rstrip(".")
+        event = re.match(r"(?:重要事件|今天发生了)[：:]", sentence)
+        questions = (
+            tuple(q for q in _QUESTIONS if q not in {"什么", "哪里", "哪儿", "谁"})
+            if event
+            else _QUESTIONS
+        )
+        if not sentence or any(cue in sentence for cue in (*questions, *_NON_ASSERTIONS)):
+            continue
+        if sentence.startswith("我喜欢的") or "住院" in sentence:
+            continue
+        # Resolve this exact, explicit anaphoric negation before splitting the comma.
+        if _REVERSAL.fullmatch(sentence):
+            clauses.append(sentence)
+            continue
+        # Explicit teaching/event syntax may legitimately contain descriptive commas.
+        if re.match(r"(?:记住|学习|知识|重要事件|今天发生了|关系)[：:]", sentence):
+            clauses.append(sentence)
+            continue
+        for clause in re.split(r"[，,]+", sentence):
+            clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
+            if sentence.startswith("我") and clause.startswith(("现在", "已经", "不再")):
+                clause = "我" + clause
+            # Do not swallow a second proposition into a personal fact's object.
+            if any(cue in clause for cue in ("但是", "但", "不过", "虽然", "因为", "然后")):
+                continue
+            if re.search(r"(?:喜欢|讨厌).+(?:喜欢|讨厌)", clause):
+                continue
+            clauses.append(clause)
+    return clauses
 
 
 def extract_extended(sentence: str) -> MemoryCandidate | None:
     """Anchored first-person assertions only. Ambiguous preference requires confirmation."""
-    uncertain = re.fullmatch(r"(?:其实)?我(?:可能|也许|好像)(?:有点)?喜欢(.+)", sentence)
+    uncertain = re.fullmatch(
+        r"(?:其实)?我(?:可能|也许|好像)(?:有点)?喜欢(.+)", sentence
+    ) or re.fullmatch(r"我喜欢(.+?)吧", sentence)
     if uncertain:
         return MemoryCandidate("preference", "用户", "likes", uncertain[1], True).validated()
-    preference = re.fullmatch(r"(?:其实)?我(?:从小)?(?:就)?(?:一直)?(?:特别|很)?喜欢(.+)", sentence)
+    reversal = _REVERSAL.fullmatch(sentence)
+    if reversal:
+        return MemoryCandidate("preference", "用户", "dislikes", reversal[1]).validated()
+    negative = re.fullmatch(r"我(?:(?:现在|已经)?不喜欢|不再喜欢|讨厌)(.+?)(?:了)?", sentence)
+    if negative:
+        return MemoryCandidate("preference", "用户", "dislikes", negative[1]).validated()
+    preference = re.fullmatch(
+        r"(?:其实)?我(?:现在)?(?:从小)?(?:就)?(?:一直)?(?:特别|很)?喜欢(.+)", sentence
+    )
     favorite = re.fullmatch(r"(?:其实)?(.+?)是我最喜欢的(?:水果|动物|食物|颜色)", sentence)
     address = re.fullmatch(r"我(?:现在住(?:在)?|住在)(.+)", sentence)
     friend = re.fullmatch(r"我的朋友叫(.+)", sentence)

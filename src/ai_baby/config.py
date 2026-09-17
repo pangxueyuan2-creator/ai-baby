@@ -34,6 +34,11 @@ class Config:
     max_retries: int = 0
     retry_backoff: float = 0.25
 
+    @property
+    def is_loopback(self) -> bool:
+        """Only explicitly named loopback endpoints qualify for local transport rules."""
+        return urlsplit(self.base_url).hostname in {"localhost", "127.0.0.1", "::1"}
+
     def validate(self) -> "Config":
         """Validate before any data is sent to an external provider."""
         if self.provider not in {"mock", "openai-compatible"}:
@@ -45,8 +50,16 @@ class Config:
         if self.provider == "openai-compatible":
             if not self.allow_external:
                 raise ValueError("外部模式需显式设置 AI_BABY_ALLOW_EXTERNAL=true。")
-            url = urlsplit(self.base_url)
-            local = url.hostname in {"localhost", "127.0.0.1", "::1"}
+            if any(ord(c) <= 32 or 127 <= ord(c) <= 159 for c in self.base_url):
+                raise ValueError("API 地址不能包含空白或控制字符。")
+            try:
+                url = urlsplit(self.base_url)
+                port = url.port
+            except ValueError:
+                raise ValueError("API 地址或端口格式无效。") from None
+            if port == 0:
+                raise ValueError("API 端口必须在 1–65535 之间。")
+            local = self.is_loopback
             if not url.hostname or (url.scheme != "https" and not (local and url.scheme == "http")):
                 raise ValueError("API 地址需要 HTTPS；仅回环本地服务允许 HTTP。")
             if url.username or url.password or url.query or url.fragment:

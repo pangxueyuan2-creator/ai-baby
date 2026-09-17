@@ -1,4 +1,80 @@
-# 第二阶段验收
+# 0.3 深度维护验收
+
+本轮基于 `a500a76b6a7fb5f93749bd6a21ccb302c061af32`，没有重建仓库。测试只使用虚构资料、临时数据库、mock 或回环 HTTP，不读取默认宝宝目录或调用付费 API。
+
+## 修改前 baseline
+
+Windows / Python 3.14.5 / SQLite 3.50.4：`117 passed in 32.24s`。开发环境最初缺少 ruff/build；安装项目声明的 `.[dev]` 后，ruff、42 个文件的 format check、wheel/sdist build 全部通过。该 main 的 [GitHub Actions](https://github.com/pangxueyuan2-creator/ai-baby/actions/runs/35191892534) 成功。历史 `65ffb21` 曾在旧 SQLite 上迁移失败，`a500a76` 已修复；本轮不修改已发布的 v2 迁移。
+
+## 发现与修复
+
+没有发现已证实的 Critical 问题。严重性表示对本项目持久数据的影响，不是 CVSS。
+
+| 严重程度 | 根因 | 修复及回归证据 |
+| --- | --- | --- |
+| High | 独立 learn/episode 多条 SQL 自动提交，索引失败留下半条记忆 | 保存点原子化；故障注入验证事实、索引、revision 同时回滚 |
+| High | 嵌套 BEGIN 失败误回滚外层；备份自身活动事务可能卡住 | 入口拒绝，保留外层工作；备份调用先检查事务 |
+| High | forget 删除 receipt，旧重试重新学习被忘事实 | v3 撤销标记清空答复，保留窗口内去重身份并拒绝重放 |
+| High | 大小写/空白变体绕过 forget；旧经历/curiosity/export 泄漏 | 规范化清理，加重启、导出与 context 测试 |
+| High | 候选 ID 重用或同轮已失效仍提示确认 | 持久单调序号、迁移保留最大 ID、只提示仍有效候选 |
+| High | 新朋友覆盖旧朋友，纠正后派生经历仍有效 | 多值关系；纠正时停用关联经历/问题；v3 修复已有旧关联 |
+| High | 疑问/转述/否定/复合句被当事实、攻击或喜爱 | 保守分句和有限明确纠正规则，不做模糊个人信息推断 |
+| High | 慢速滴流永占 worker，并发准入竞态 | 取消活动 socket、原子准入、显式关闭 HTTPError |
+| High | localhost 继承系统代理，私人上下文可能外发 | 回环地址禁用代理，使用本地 HTTP 合约回归 |
+| High | 通用“我们/第一次”词导致错误共同回忆 | 先提取话题再检索，有实际重叠才用于回忆；缺证据明确说明 |
+| High | 迁移提交后才校验并发元数据，启动失败但版本已变 | 改为 COMMIT 前校验；真实进程中断、损坏 schema 与回滚测试 |
+| Medium | 关系常量增长快速刷满 | 递减增益、可恢复，保留原有人格渐变公式 |
+| Medium | 日记整段截断丢失事件和人格；空记录重复 | 分别限长事件，保留变化摘要，空白区间只更新游标 |
+| Medium | 显式自由文字知识没进入成长指标 | world/knowledge 共用知识和 novelty 统计，个人记忆仍分开 |
+| Medium | 成熟追问虚构过去课程、普通回复无条件提问 | 仅连接实际证据，减少绕过 curiosity 的追问 |
+| Medium | 新数据库/备份/导出 POSIX 权限可能过宽 | 独占 0600 创建；Windows 继承 ACL；不改既有权限 |
+| Low | 宝宝名字不显示、非法 ID 回显 Python 异常 | 持久名字用于标签/问候，ID 错误使用明确中文说明 |
+
+## 重复运行
+
+```sh
+python scripts/acceptance_demo.py
+python scripts/stress_demo.py --turns 1000 --records 10000
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
+python -m build
+```
+
+本轮 A–H 全通过，现在 A 会迁移至 schema 3；B 第二写入 **6.97 ms**，provider 等待 2 秒；D 旧事件排名 1，查询 **3.86 ms**。CLI subprocess 实际覆盖出生、妈妈称呼、教学、闲聊、调侃、退出/重启/回忆、用户改名/称呼、宝宝改名、personality、journal、forget、export、backup。隔离安装 wheel 后，在源码外重复出生、教学和重启；console 和 module entrypoint 均通过。
+
+## 三种养育方式，各 1,000 轮
+
+相同初始人格和关系，运行完整 preview/generate/commit，模拟每轮间隔 60 秒。
+
+| 结果 | A 温柔探索教学 | B 谨慎保持距离 | C 玩笑游戏教学 |
+| --- | ---: | ---: | ---: |
+| confidence | 86.11 | 50.00 | 55.66 |
+| curiosity | 91.68 | 70.05 | 84.21 |
+| caution | 50.00 | 84.95 | 50.00 |
+| playfulness | 50.00 | 50.00 | 91.06 |
+| trust | 93.46 | 20.00 | 72.30 |
+| world knowledge | 200 | 0 | 200 |
+| stage | mature | newborn | mature |
+| 日记 / 重复 | 50 / 0 | 50 / 0 | 50 / 0 |
+| 主动问题数 | 100 | 0 | 100 |
+| 数据库字节 | 1,540,096 | 229,376 | 1,122,304 |
+
+最大人格单轮变化 **0.09**，人格/关系没有数值到达 0 或 100。问题间隔至少八轮，最多三个 pending。测试比较全部人格、关系、成长指标、日记、相关事实/经历和真实 provider context，重启后一致。前/后 100 轮耗时中位数：A **9.60/18.83 ms**，B **8.82/8.96 ms**，C **9.35/13.25 ms**。这是当前机器测量，不是性能承诺。CI 运行较短的 120×3 模拟；完整 3,000 轮单独执行。
+
+## 万条长期记忆
+
+插入 **10,001 facts、10,001 episodes、10,000 messages**，消息只保留最近 100 条。数据库 **11,182,080 bytes**，插入 **2.127 s**。事实检索中位 **0.174 ms**；旧重要事件 **18.465 ms** 且排名第一；高频通用词的事实+经历查询组合 **73.184 ms**。查询计划确认使用 `fact_tokens` covering index；forget/export/上下文大小/SQLite 完整性均通过。未引入语义依赖或没有依据的微优化。
+
+## 迁移与验证范围
+
+新增 v2→v3，保留原 v1→v2。冻结 v2 SQL fixture 验证 profile、facts、episodes、growth、relationship、emotion、personality、journals、candidates、curiosity、settings、messages、索引及迁移前备份。子进程 `os._exit` 测试迁移与生成期间突然中断。
+
+原八个 Python 3.11–3.14 / Windows、Linux、macOS 组合保留；quality job 新增源码外干净 wheel 安装和 console entrypoint 验证。最终结果以对应提交的 [Actions](https://github.com/pangxueyuan2-creator/ai-baby/actions) 为准。Windows 对 POSIX 权限及缺失符号链接权限的案例明确 skip，Linux/macOS 执行对应检查。
+
+保留的技术债：词法检索与有限中文语法；外部模型幻觉不受 prompt 绝对保证；仅聊天可能长期 newborn；receipt 只有 256 条窗口；升级前已删除的候选历史未知；遗忘不是语义抹除或安全擦除；DNS 无法强制终止，TLS 握手仍受 socket timeout。没有启用 WAL，现有短事务在本轮测量中已满足双实例场景，不增加无证据的旁文件与恢复复杂度。未加入 streaming、重型模型依赖或完整时间型记忆。
+
+## 历史第二阶段验收记录
 
 基线是 `c4871b8`：62 个测试通过，GitHub CI 全绿。演示使用虚构的 Alice 和临时数据库，不读取默认宝宝目录、不读取 API key、不调用付费服务。
 

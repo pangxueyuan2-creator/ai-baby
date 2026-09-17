@@ -47,7 +47,21 @@ def advance(memory: MemoryStore, context: Context) -> str | None:
                 else f"可以再举一个关于{fact['subject'][:60]}的小例子吗？"
             )
         else:
-            question = f"关于{fact['value'][:60] if fact['kind'] == 'preference' else fact['subject'][:60]}，这和我们以前学过的事情有什么联系？你的看法有变化吗？"
+            subject = fact["value"][:60] if fact["kind"] == "preference" else fact["subject"][:60]
+            earlier = next(
+                (
+                    saved
+                    for saved in context.facts
+                    if saved.id not in context.learning.fact_ids
+                    and saved.kind in {"world", "knowledge"}
+                ),
+                None,
+            )
+            question = (
+                f"关于{subject}，和以前学过的“{earlier.subject[:40]} · {earlier.value[:60]}”可能有什么联系？"
+                if earlier
+                else f"关于{subject}，你的看法是什么？可以举个不同的例子吗？"
+            )
         memory.db.execute(
             "INSERT INTO curiosity VALUES(?,?,?,?,'pending')", (topic, fact_id, question, turn)
         )

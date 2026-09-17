@@ -45,3 +45,9 @@ jobs:
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - run: python -m build
+      - name: Install wheel outside the source checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/ai-baby-wheel"
+          "$RUNNER_TEMP/ai-baby-wheel/bin/python" -m pip install --no-deps dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby" --help

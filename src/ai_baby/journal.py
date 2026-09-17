@@ -45,10 +45,17 @@ def consolidate(memory: MemoryStore, *, force: bool = False) -> str | None:
         for key in current
         if abs(current[key] - previous[key]) >= 0.05
     ]
+    # Advance the interval even when nothing changed; retain the last written
+    # personality snapshot so sub-threshold changes can accumulate into evidence.
+    memory.set_setting("journal_cursor", str(maximum))
+    memory.set_setting("journal_turn", str(state.interactions))
+    if not rows and not changes:
+        return None
+    excerpts = [row[0][:120] + ("…" if len(row[0]) > 120 else "") for row in rows]
     summary = (
         f"出生第 {day} 天（软件角色状态记录，非真实感受）。阶段：{state.stage}。"
         + "记录："
-        + ("；".join(row[0] for row in rows) or "本段没有新增重要经历")
+        + ("；".join(excerpts) or "本段没有新增重要经历")
         + "。人格变化："
         + ("、".join(changes) or "暂无明显变化")
         + "。"
@@ -57,8 +64,6 @@ def consolidate(memory: MemoryStore, *, force: bool = False) -> str | None:
         "INSERT INTO journals(through_episode,through_turn,summary) VALUES(?,?,?)",
         (maximum, state.interactions, summary),
     )
-    memory.set_setting("journal_cursor", str(maximum))
-    memory.set_setting("journal_turn", str(state.interactions))
     memory.set_setting("journal_personality", json.dumps(current))
     return summary
 

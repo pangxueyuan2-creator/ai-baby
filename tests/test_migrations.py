@@ -37,7 +37,7 @@ def test_v1_migration_preserves_every_existing_layer(tmp_path):
     create_v1(path)
     memory = MemoryStore(path)
     try:
-        assert memory.db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert memory.db.execute("PRAGMA user_version").fetchone()[0] == migrations.SCHEMA_VERSION
         assert memory.profile().name == "Alice"
         assert memory.profile().gender == "female"
         assert memory.profile().address == "妈妈"
@@ -85,14 +85,11 @@ def test_migration_failure_rolls_back_ddl_and_data(tmp_path, monkeypatch):
 def test_backup_failure_does_not_start_migration(tmp_path, monkeypatch):
     path = tmp_path / "baby.sqlite3"
     create_v1(path)
-    original = Path.open
 
-    def fail(self, *args, **kwargs):
-        if self.name.startswith("pre-v1-"):
-            raise PermissionError("backup blocked")
-        return original(self, *args, **kwargs)
+    def fail(path):
+        raise PermissionError("backup blocked")
 
-    monkeypatch.setattr(Path, "open", fail)
+    monkeypatch.setattr(migrations, "reserve_private_file", fail)
     with pytest.raises(Exception, match="无法打开记忆"):
         MemoryStore(path)
     with sqlite3.connect(path) as db:
@@ -114,7 +111,7 @@ def test_two_simultaneous_migration_openers(tmp_path):
             memory.close()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        assert list(executor.map(lambda _: open_one(), range(2))) == [2, 2]
+        assert list(executor.map(lambda _: open_one(), range(2))) == [migrations.SCHEMA_VERSION] * 2
     assert len(list((tmp_path / "backups").glob("*.sqlite3"))) == 1
 
 
