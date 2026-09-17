@@ -31,12 +31,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
-    """Works with POST /chat/completions, including the loopback-only Ollama preset."""
+    """Works with Chat Completions, including the Ollama and Grok presets."""
 
     def __init__(self, config: Config):
         self.config = config.validate()
-        if config.provider not in {"openai-compatible", "ollama"}:
-            raise ValueError("此 provider 需要 openai-compatible 或 ollama 模式。")
+        if config.provider not in {"openai-compatible", "ollama", "grok"}:
+            raise ValueError("此 provider 需要 openai-compatible、ollama 或 grok 模式。")
         self._transport = SocketControl()
         handlers = [
             NoRedirect(),
