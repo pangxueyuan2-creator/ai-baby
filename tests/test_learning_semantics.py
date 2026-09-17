@@ -53,6 +53,32 @@ def test_separate_first_person_clauses_are_distinct_facts(baby):
     }
 
 
+def test_supported_natural_aliases_remain_explicit_and_bounded(baby):
+    baby.chat("我家在杭州。")
+    baby.chat("I like cats.")
+    baby.chat("小明是我同学。")
+
+    facts = {(f.kind, f.predicate, f.value) for f in baby.memory.facts()}
+    assert ("personal", "居住地", "杭州") in facts
+    assert ("preference", "likes", "cats") in facts
+    assert ("relation", "同学", "小明") in facts
+
+
+def test_natural_relation_aliases_are_multi_value(baby):
+    baby.chat("小明是我的朋友。")
+    baby.chat("我的朋友叫小红。")
+
+    assert {(f.predicate, f.value) for f in baby.memory.facts() if f.kind == "relation"} == {
+        ("朋友", "小明"),
+        ("朋友", "小红"),
+    }
+
+
+def test_english_question_is_not_learned(baby):
+    baby.chat("Do I like cats?")
+    assert not baby.memory.facts()
+
+
 def test_unsupported_temporal_preference_does_not_invent_current_fact(baby):
     baby.chat("我以前喜欢橘猫")
     assert not baby.memory.facts()
