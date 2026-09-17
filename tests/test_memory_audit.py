@@ -134,9 +134,7 @@ def test_batch_fixture_validation_returns_usage_error(tmp_path, capsys):
 
 def test_batch_mode_rejects_single_text_expectation_flags(tmp_path, capsys):
     cases = tmp_path / "memory-cases.jsonl"
-    cases.write_text(
-        json.dumps({"text": "I like tea.", "expect": "memory"}), encoding="utf-8"
-    )
+    cases.write_text(json.dumps({"text": "I like tea.", "expect": "memory"}), encoding="utf-8")
 
     assert main(["--cases", str(cases), "--expect-memory"]) == 2
 
