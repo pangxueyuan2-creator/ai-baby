@@ -2,6 +2,8 @@
 
 import pytest
 
+from ai_baby.models import Growth
+
 
 @pytest.mark.parametrize(
     "question,expected",
@@ -56,3 +58,20 @@ def test_mock_does_not_present_arbitrary_retrieval_as_related_answer(baby):
     assert "小明" in reply  # It may quote the user's question, but not the stored friend fact as an answer.
     assert "相关记录" not in reply
     assert "还没有学过相关知识" in reply
+
+
+def test_learning_reply_is_human_readable_and_stage_aware(baby):
+    newborn = baby.chat("我喜欢草莓。 ").text
+    assert "草莓" in newborn
+    assert "likes" not in newborn
+    assert "用户 ·" not in newborn
+    assert "先记住" in newborn
+
+    with baby.memory.transaction():
+        baby.memory.save_state("growth", Growth(interactions=500, stage="mature"))
+
+    mature = baby.chat("我喜欢橘猫。 ").text
+    assert "橘猫" in mature
+    assert "likes" not in mature
+    assert "明确告诉我的记录" in mature
+    assert mature != newborn
