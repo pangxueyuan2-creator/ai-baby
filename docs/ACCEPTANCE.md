@@ -20,6 +20,12 @@
 
 全部模型测试只使用临时合成数据和 fake loopback 服务，没有安装 Ollama、下载模型、接触真实用户数据库或调用付费 API。协议兼容测试不证明某个真实模型的角色一致性或中文质量；回环连接也不能限制本机服务继续转发云端。复现入口为下方命令，以及 `tests/test_local_*.py` 和 `tests/test_model_switching.py`。最终跨平台结果请绑定对应 PR/head 的 [Actions](https://github.com/pangxueyuan2-creator/ai-baby/actions) 查看。
 
+### 合并后 macOS 端口测试修正
+
+PR #13 的九项检查均成功，但相同代码合并后的 [macOS / Python 3.11 复验](https://github.com/pangxueyuan2-creator/ai-baby/actions/runs/35205561564/job/105150352701) 暴露一个测试假设：绑定但不监听的端口不保证在三秒期限前立即拒绝 TCP 连接，该次实际返回了安全的 `timeout`。测试改为验证不可用端口会在原期限内以 `transport` 或 `timeout` 失败；新增从 socket 注入明确 `ConnectionRefusedError` 的独立测试，严格检查真实传输链返回 `transport`、目标正确且不泄露异常细节。已有慢响应的严格 timeout 测试保留。没有增加等待时间、跳过测试、修改 provider 行为或重复重跑碰运气；此修正使本轮累计新增测试实例为 115。
+
+修正后完整本地套件为 **408 passed, 5 skipped（61.11 秒）**，共 413 个测试实例；ruff check、73 文件 format check、wheel/sdist build 均通过。运行时代码未变，前述模型切换、干净安装、A–H 与压力结果仍对应相同应用实现。
+
 ## 历史：0.3 深度维护验收
 
 本轮基于 `a500a76b6a7fb5f93749bd6a21ccb302c061af32`，没有重建仓库。测试只使用虚构资料、临时数据库、mock 或回环 HTTP，不读取默认宝宝目录或调用付费 API。
