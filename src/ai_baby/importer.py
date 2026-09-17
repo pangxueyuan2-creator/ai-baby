@@ -117,15 +117,17 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
     if not source.is_file():
         raise ValueError("隐私导出文件不存在或不是普通文件。")
     try:
-        if source.stat().st_size > MAX_EXPORT_BYTES:
-            raise ValueError("隐私导出文件过大；当前版本最多导入 20 MiB。")
+        with source.open("rb") as stream:
+            content = stream.read(MAX_EXPORT_BYTES + 1)
     except OSError as exc:
         raise ValueError("无法读取隐私导出文件。") from exc
+    if len(content) > MAX_EXPORT_BYTES:
+        raise ValueError("隐私导出文件过大；当前版本最多导入 20 MiB。")
 
-    verify_checksum_manifest(source, required=require_checksum)
+    verify_checksum_manifest(source, required=require_checksum, content=content)
     try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError) as exc:
+        payload = json.loads(content.decode("utf-8"))
+    except UnicodeError as exc:
         raise ValueError("无法读取隐私导出文件。") from exc
     except json.JSONDecodeError as exc:
         raise ValueError("隐私导出不是有效 JSON。") from exc
