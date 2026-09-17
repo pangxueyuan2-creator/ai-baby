@@ -77,6 +77,18 @@ _ENGLISH_QUALIFIER = re.compile(
     r"i|you|he|she|they|we)\b",
     re.IGNORECASE,
 )
+_ENGLISH_FACT_CUE = re.compile(
+    r"\b(?:i\s+live\s+in|my\s+birthday\s+is|i\s+work\s+as|"
+    r"my\s+(?:job|profession)\s+is|is\s+my\s+(?:friend|classmate|teacher|coworker|"
+    r"colleague|family\s+member))\b",
+    re.IGNORECASE,
+)
+_ENGLISH_FACT_QUALIFIER = re.compile(
+    r"\b(?:if|unless|maybe|perhaps|possibly|probably|might|would|could|should|think|"
+    r"guess|heard|say|said|used\s+to|not|never|or|but|although|because|whether|unsure|"
+    r"uncertain)\b",
+    re.IGNORECASE,
+)
 
 
 def _english_preference(sentence: str) -> MemoryCandidate | None:
@@ -90,6 +102,41 @@ def _english_preference(sentence: str) -> MemoryCandidate | None:
     # Follow the matched grammar branch; Unicode IGNORECASE is not str.lower().
     predicate = "likes" if match["positive"] is not None else "dislikes"
     return MemoryCandidate("preference", "用户", predicate, value).validated()
+
+
+def _english_simple_fact(sentence: str) -> MemoryCandidate | None:
+    """Recognize a few complete English profile/relation assertions conservatively."""
+    if _ENGLISH_FACT_QUALIFIER.search(sentence) or re.search(r"[;?!]", sentence):
+        return None
+
+    residence = re.fullmatch(r"i\s+live\s+in\s+(.+)", sentence, re.IGNORECASE)
+    birthday = re.fullmatch(r"my\s+birthday\s+is\s+(.+)", sentence, re.IGNORECASE)
+    profession = re.fullmatch(
+        r"(?:i\s+work\s+as|my\s+(?:job|profession)\s+is)\s+(.+)", sentence, re.IGNORECASE
+    )
+    relation = re.fullmatch(
+        r"(.+?)\s+is\s+my\s+(friend|classmate|teacher|coworker|colleague|family\s+member)",
+        sentence,
+        re.IGNORECASE,
+    )
+
+    if residence:
+        return MemoryCandidate("personal", "用户", "居住地", residence[1]).validated()
+    if birthday:
+        return MemoryCandidate("personal", "用户", "生日", birthday[1]).validated()
+    if profession:
+        return MemoryCandidate("personal", "用户", "职业", profession[1]).validated()
+    if relation:
+        predicate = {
+            "friend": "朋友",
+            "classmate": "同学",
+            "teacher": "老师",
+            "coworker": "同事",
+            "colleague": "同事",
+            "family member": "家人",
+        }[re.sub(r"\s+", " ", relation[2].casefold())]
+        return MemoryCandidate("relation", "我", predicate, relation[1]).validated()
+    return None
 
 
 def _unsupported_still(sentence: str) -> bool:
@@ -137,6 +184,11 @@ def assertion_clauses(text: str) -> list[str]:
             # Do not discard a qualifier/report/tag question when splitting commas.
             # Every part must be a complete supported assertion; otherwise abstain.
             if not all(_english_preference(part.strip()) for part in re.split(r"[，,]+", sentence)):
+                continue
+        if _ENGLISH_FACT_CUE.search(sentence):
+            # English fact assertions are deliberately one-clause only. In particular,
+            # never split "I live in Paris, if ..." and persist the first fragment.
+            if re.search(r"[，,]", sentence) or _english_simple_fact(sentence) is None:
                 continue
         for clause in re.split(r"[，,]+", sentence):
             clause = re.sub(r"^(?:但是|但|而且|其实)", "", clause.strip())
@@ -208,6 +260,7 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     named_relation = re.fullmatch(r"我的(朋友|同学|老师|同事|家人)叫(.+)", sentence)
     reverse_relation = re.fullmatch(r"(.+?)是我(?:的)?(朋友|同学|老师|同事|家人)", sentence)
     english_preference = _english_preference(sentence)
+    english_fact = _english_simple_fact(sentence)
     if preference:
         return MemoryCandidate("preference", "用户", "likes", preference[1]).validated()
     if intense:
@@ -216,6 +269,8 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
         return MemoryCandidate("preference", "用户", "likes", favorite[1]).validated()
     if english_preference:
         return english_preference
+    if english_fact:
+        return english_fact
     if address and "住院" not in sentence:
         return MemoryCandidate("personal", "用户", "居住地", address[1]).validated()
     if home_address and "住院" not in sentence:
