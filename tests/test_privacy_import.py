@@ -81,12 +81,12 @@ def test_default_privacy_export_round_trips_into_new_database(tmp_path):
     assert imported["profile"]["gender"] == original["profile"]["gender"]
     assert imported["profile"]["address"] == original["profile"]["address"]
     assert imported["baby"] == original["baby"]
-    assert visible_rows(imported, "facts", ("kind", "subject", "predicate", "value", "active")) == visible_rows(
-        original, "facts", ("kind", "subject", "predicate", "value", "active")
-    )
-    assert visible_rows(imported, "episodes", ("kind", "summary", "importance", "active")) == visible_rows(
-        original, "episodes", ("kind", "summary", "importance", "active")
-    )
+    assert visible_rows(
+        imported, "facts", ("kind", "subject", "predicate", "value", "active")
+    ) == visible_rows(original, "facts", ("kind", "subject", "predicate", "value", "active"))
+    assert visible_rows(
+        imported, "episodes", ("kind", "summary", "importance", "active")
+    ) == visible_rows(original, "episodes", ("kind", "summary", "importance", "active"))
     assert "history" not in imported
 
 
