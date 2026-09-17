@@ -21,6 +21,7 @@ from .models import (
     record,
     safe_output,
 )
+from .provider_notices import ProviderNotices
 from .providers import MockProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
 
@@ -211,16 +212,49 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="AI Baby / AI 宝宝养成模拟器")
     parser.add_argument("--data-dir", type=Path, help="独立宝宝数据目录")
     parser.add_argument("--env-file", type=Path, help="显式选择 .env 文件（默认当前目录）")
+    local = parser.add_mutually_exclusive_group()
+    local.add_argument("--local-models", action="store_true", help="只查询本机已有模型，然后退出")
+    local.add_argument(
+        "--setup-local", action="store_true", help="查询、选择本机已有模型并开始聊天"
+    )
+    local.add_argument(
+        "--local-config", type=Path, help="使用向导保存的本机连接 JSON（不修改 .env）"
+    )
+    parser.add_argument(
+        "--local-provider", choices=("ollama", "local-openai"), help="发现服务类型，默认 ollama"
+    )
+    parser.add_argument("--local-url", help="发现时指定一个本机 API 地址；不扫描其它端口")
     args = parser.parse_args(argv)
+    discovery = args.local_models or args.setup_local
+    if (args.local_provider or args.local_url) and not discovery:
+        parser.error("--local-provider / --local-url 仅用于 --setup-local 或 --local-models。")
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     memory = None
     try:
-        config = Config.load(args.data_dir, args.env_file)
+        config = Config.load(
+            args.data_dir,
+            args.env_file,
+            local_config=args.local_config,
+            provider_override="mock" if discovery else None,
+        )
+        if discovery:
+            from .local_setup import setup_local
+
+            selected = setup_local(
+                config,
+                provider=args.local_provider or "ollama",
+                base_url=args.local_url,
+                choose=args.setup_local,
+            )
+            if selected is None:
+                return 0
+            config = selected
         provider = MockProvider() if config.provider == "mock" else OpenAICompatibleProvider(config)
         print("==============================\nAI Baby / AI 宝宝\n==============================")
         modes = {
             "mock": "模式：基础离线（无网络请求）",
-            "ollama": "模式：本地 Ollama；你的输入、资料、相关记忆和近期聊天只发送到本机回环地址。",
+            "ollama": "模式：本地 Ollama；输入、资料、相关记忆和近期聊天发送到本机回环服务，其后续行为由该服务决定。",
+            "local-openai": "模式：本地 OpenAI-compatible；输入、资料、相关记忆和近期聊天发送到本机回环服务，其后续行为由该服务决定。",
             "grok": "模式：xAI Grok；你的输入、资料、相关记忆和近期聊天将发送到 api.x.ai。",
         }
         print(
@@ -237,6 +271,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(baby.name + "：" + baby.greeting())
         print("输入 /help 查看命令，/quit 退出。每轮自动保存。")
+        if config.provider == "mock":
+            print("想使用本机模型？下次运行时加 --setup-local（不会自动安装或下载）。")
+        notices = ProviderNotices(config.provider)
         while True:
             text = input("你 > ").strip()
             if not text:
@@ -248,8 +285,9 @@ def main(argv: list[str] | None = None) -> int:
                         break
                     continue
                 reply = baby.chat(text)
-                if reply.warning:
-                    print(safe_output(reply.warning))
+                notice = notices.observe(reply.warning)
+                if notice:
+                    print(safe_output(notice))
                 print(baby.name + "：" + reply.text)
             except (ValueError, TurnConflict) as exc:
                 print(safe_output(str(exc)))

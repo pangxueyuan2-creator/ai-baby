@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .models import clean_text
+
 
 def read_env(path: Path) -> dict[str, str]:
     """Read KEY=value without executing/interpolating text or changing os.environ."""
@@ -33,6 +35,7 @@ class Config:
     allow_external: bool = False
     max_retries: int = 0
     retry_backoff: float = 0.25
+    allow_local_auth: bool = False
 
     @property
     def is_loopback(self) -> bool:
@@ -41,13 +44,19 @@ class Config:
 
     def validate(self) -> "Config":
         """Validate before any data is sent to a generation provider."""
-        if self.provider not in {"mock", "openai-compatible", "ollama", "grok"}:
-            raise ValueError("未知 provider；请选择 mock、ollama、grok 或 openai-compatible。")
+        if self.provider not in {"mock", "openai-compatible", "ollama", "local-openai", "grok"}:
+            raise ValueError(
+                "未知 provider；请选择 mock、ollama、local-openai、grok 或 openai-compatible。"
+            )
         if not 1 <= self.timeout <= 120:
             raise ValueError("超时时间必须在 1–120 秒之间。")
         if self.max_retries not in {0, 1, 2} or not 0 <= self.retry_backoff <= 2:
             raise ValueError("重试次数必须在 0–2，退避时间必须在 0–2 秒。")
-        if self.provider in {"openai-compatible", "ollama", "grok"}:
+        if self.provider in {"openai-compatible", "ollama", "local-openai", "grok"}:
+            if not isinstance(self.model, str):
+                raise ValueError("模型名称必须是文本。")
+            if len(self.base_url) > 2048:
+                raise ValueError("API 地址过长。")
             if any(ord(c) <= 32 or 127 <= ord(c) <= 159 for c in self.base_url):
                 raise ValueError("API 地址不能包含空白或控制字符。")
             try:
@@ -62,14 +71,14 @@ class Config:
                 raise ValueError("API 地址需要 HTTPS；仅回环本地服务允许 HTTP。")
             if url.username or url.password or url.query or url.fragment:
                 raise ValueError("API 地址不能包含凭据、查询串或片段。")
-            if self.provider == "ollama":
+            if self.provider in {"ollama", "local-openai"}:
                 if not local:
                     raise ValueError(
-                        "ollama 预设只允许 localhost / 127.0.0.1 / ::1；远程服务请使用 "
+                        f"{self.provider} 预设只允许 localhost / 127.0.0.1 / ::1；远程服务请使用 "
                         "openai-compatible 并显式启用外部模式。"
                     )
                 if not self.model.strip():
-                    raise ValueError("ollama 模式需要 AI_BABY_MODEL。")
+                    raise ValueError("本地模型模式需要 AI_BABY_MODEL；可运行 --setup-local 选择。")
             else:
                 if not self.allow_external:
                     raise ValueError("外部模式需显式设置 AI_BABY_ALLOW_EXTERNAL=true。")
@@ -85,24 +94,39 @@ class Config:
                         "grok 预设固定使用 https://api.x.ai/v1；"
                         "自定义端点请使用 openai-compatible。"
                     )
+            clean_text(self.model, 200)
             if any(ord(c) < 32 or ord(c) == 127 for c in self.api_key):
                 raise ValueError("API key 格式无效。")
         return self
 
     @classmethod
-    def load(cls, data_dir: Path | None = None, env_file: Path | None = None) -> "Config":
+    def load(
+        cls,
+        data_dir: Path | None = None,
+        env_file: Path | None = None,
+        *,
+        local_config: Path | None = None,
+        provider_override: str | None = None,
+    ) -> "Config":
         """Environment overrides the chosen .env file. Mock remains the default."""
         values = read_env(env_file or Path.cwd() / ".env") | dict(os.environ)
-        provider = values.get("AI_BABY_PROVIDER", "mock")
+        if local_config is not None:
+            from .local_settings import read_local_settings
+
+            # An explicit local-config flag cannot be redirected by provider URL/model env vars.
+            values.update(read_local_settings(local_config))
+        provider = provider_override or values.get("AI_BABY_PROVIDER", "mock")
         base_url = values.get("AI_BABY_BASE_URL", "").strip()
         if not base_url:
             base_url = {
                 "ollama": "http://127.0.0.1:11434/v1",
+                "local-openai": "http://127.0.0.1:8080/v1",
                 "grok": "https://api.x.ai/v1",
             }.get(provider, "https://api.openai.com/v1")
         return cls(
-            data_dir=data_dir
-            or Path(values.get("AI_BABY_DATA_DIR", str(Path.home() / ".ai-baby"))).expanduser(),
+            data_dir=(
+                data_dir or Path(values.get("AI_BABY_DATA_DIR", str(Path.home() / ".ai-baby")))
+            ).expanduser(),
             provider=provider,
             api_key=values.get("AI_BABY_API_KEY", ""),
             base_url=base_url.rstrip("/"),
@@ -111,4 +135,5 @@ class Config:
             allow_external=values.get("AI_BABY_ALLOW_EXTERNAL", "false").lower() == "true",
             max_retries=int(values.get("AI_BABY_MAX_RETRIES", "0")),
             retry_backoff=float(values.get("AI_BABY_RETRY_BACKOFF", "0.25")),
+            allow_local_auth=values.get("AI_BABY_ALLOW_LOCAL_AUTH", "false").lower() == "true",
         ).validate()

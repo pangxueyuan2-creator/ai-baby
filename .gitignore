@@ -19,5 +19,12 @@ dist/
 .coverage
 htmlcov/
 private-exports/
+local-model-*.json
+*.gguf
+*.safetensors
+*.model
+*.bin
+.ollama/
+.cache/huggingface/
 exports/
 .DS_Store
