@@ -87,9 +87,7 @@ class Config:
         base_url = values.get("AI_BABY_BASE_URL", "").strip()
         if not base_url:
             base_url = (
-                "http://127.0.0.1:11434/v1"
-                if provider == "ollama"
-                else "https://api.openai.com/v1"
+                "http://127.0.0.1:11434/v1" if provider == "ollama" else "https://api.openai.com/v1"
             )
         return cls(
             data_dir=data_dir
