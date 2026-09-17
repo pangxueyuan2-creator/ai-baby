@@ -124,13 +124,34 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     )
     favorite = re.fullmatch(r"(?:其实)?(.+?)是我最喜欢的(?:水果|动物|食物|颜色)", sentence)
     address = re.fullmatch(r"我(?:现在住(?:在)?|住在)(.+)", sentence)
+    home_address = re.fullmatch(r"我家在(.+)", sentence)
     friend = re.fullmatch(r"我的朋友叫(.+)", sentence)
+    named_relation = re.fullmatch(r"我的(朋友|同学|老师|同事|家人)叫(.+)", sentence)
+    reverse_relation = re.fullmatch(r"(.+?)是我(?:的)?(朋友|同学|老师|同事|家人)", sentence)
+    english_like = re.fullmatch(
+        r"i\s+(?:really\s+)?like\s+(.+)", sentence, flags=re.IGNORECASE
+    )
+    english_dislike = re.fullmatch(
+        r"i\s+(?:really\s+)?(?:do\s+not|don't|dislike)\s+(.+)",
+        sentence,
+        flags=re.IGNORECASE,
+    )
     if preference:
         return MemoryCandidate("preference", "用户", "likes", preference[1]).validated()
     if favorite:
         return MemoryCandidate("preference", "用户", "likes", favorite[1]).validated()
+    if english_like:
+        return MemoryCandidate("preference", "用户", "likes", english_like[1]).validated()
+    if english_dislike:
+        return MemoryCandidate("preference", "用户", "dislikes", english_dislike[1]).validated()
     if address and "住院" not in sentence:
         return MemoryCandidate("personal", "用户", "居住地", address[1]).validated()
+    if home_address and "住院" not in sentence:
+        return MemoryCandidate("personal", "用户", "居住地", home_address[1]).validated()
     if friend:
         return MemoryCandidate("relation", "我", "朋友", friend[1]).validated()
+    if named_relation:
+        return MemoryCandidate("relation", "我", named_relation[1], named_relation[2]).validated()
+    if reverse_relation:
+        return MemoryCandidate("relation", "我", reverse_relation[2], reverse_relation[1]).validated()
     return None
