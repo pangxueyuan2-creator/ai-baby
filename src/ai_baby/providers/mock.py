@@ -78,15 +78,15 @@ class MockProvider(BaseLLMProvider):
                     return f"你告诉过我，你的生日是{values[0]}。"
                 if (kind, predicate) == ("personal", "职业"):
                     return f"你告诉过我，你的职业是{values[0]}。"
-                if (kind, predicate) == ("relation", "朋友"):
-                    return "我记得你的朋友有：" + "、".join(values) + "。"
+                if kind == "relation":
+                    return f"我记得你的{predicate}有：" + "、".join(values) + "。"
             prompts = {
                 ("personal", "居住地"): "你还没有告诉我你住在哪里。",
                 ("personal", "生日"): "你还没有告诉我你的生日。",
                 ("personal", "职业"): "你还没有告诉我你的职业。",
-                ("relation", "朋友"): "你还没有告诉我谁是你的朋友。",
             }
-            return f"{address}，{prompts[route]}"
+            prompt = prompts.get(route, f"你还没有告诉我谁是你的{predicate}。")
+            return f"{address}，{prompt}"
 
         if any(w in text for w in ("喜欢什么", "讨厌什么", "喜好")):
             negative = "不喜欢" in text or "讨厌" in text
