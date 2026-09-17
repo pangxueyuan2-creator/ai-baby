@@ -128,9 +128,7 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     friend = re.fullmatch(r"我的朋友叫(.+)", sentence)
     named_relation = re.fullmatch(r"我的(朋友|同学|老师|同事|家人)叫(.+)", sentence)
     reverse_relation = re.fullmatch(r"(.+?)是我(?:的)?(朋友|同学|老师|同事|家人)", sentence)
-    english_like = re.fullmatch(
-        r"i\s+(?:really\s+)?like\s+(.+)", sentence, flags=re.IGNORECASE
-    )
+    english_like = re.fullmatch(r"i\s+(?:really\s+)?like\s+(.+)", sentence, flags=re.IGNORECASE)
     english_dislike = re.fullmatch(
         r"i\s+(?:really\s+)?(?:do\s+not|don't|dislike)\s+(.+)",
         sentence,
@@ -153,5 +151,7 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
     if named_relation:
         return MemoryCandidate("relation", "我", named_relation[1], named_relation[2]).validated()
     if reverse_relation:
-        return MemoryCandidate("relation", "我", reverse_relation[2], reverse_relation[1]).validated()
+        return MemoryCandidate(
+            "relation", "我", reverse_relation[2], reverse_relation[1]
+        ).validated()
     return None
