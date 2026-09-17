@@ -68,6 +68,18 @@ def test_corrupt_backup_never_creates_destination(tmp_path):
     assert not (data_dir / "baby.sqlite3").exists()
 
 
+def test_empty_sqlite_file_is_not_accepted_as_an_ai_baby_backup(tmp_path):
+    backup = tmp_path / "empty.sqlite3"
+    with sqlite3.connect(backup):
+        pass
+    data_dir = tmp_path / "restored"
+
+    with pytest.raises(MemoryError, match="版本不受支持"):
+        restore_backup(backup, data_dir)
+
+    assert not (data_dir / "baby.sqlite3").exists()
+
+
 def test_unsupported_future_schema_never_creates_destination(tmp_path):
     backup = tmp_path / "future.sqlite3"
     with sqlite3.connect(backup) as db:
@@ -75,7 +87,7 @@ def test_unsupported_future_schema_never_creates_destination(tmp_path):
         db.execute("PRAGMA user_version=999")
     data_dir = tmp_path / "restored"
 
-    with pytest.raises(MemoryError, match="版本或结构"):
+    with pytest.raises(MemoryError, match="版本不受支持"):
         restore_backup(backup, data_dir)
 
     assert not (data_dir / "baby.sqlite3").exists()
