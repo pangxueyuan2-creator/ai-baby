@@ -58,12 +58,48 @@ def _learning_reply(context: Context) -> str | None:
     return f"{address}，我已经把它作为你明确告诉我的记录保存下来：{summary}。我会把这份记忆和一般知识区分开。"
 
 
+def _fact_query_reply(context: Context, route: tuple[str, str]) -> str:
+    """Answer one routed memory question from evidence, including facts learned this turn."""
+    kind, predicate = route
+    address = context.profile.address
+    values = [f.value for f in context.facts if f.kind == kind and f.predicate == predicate]
+    if values:
+        if (kind, predicate) == ("personal", "居住地"):
+            return f"你告诉过我，你住在{values[0]}。"
+        if (kind, predicate) == ("personal", "生日"):
+            return f"你告诉过我，你的生日是{values[0]}。"
+        if (kind, predicate) == ("personal", "职业"):
+            return f"你告诉过我，你的职业是{values[0]}。"
+        if kind == "relation":
+            return f"我记得你的{predicate}有：" + "、".join(values) + "。"
+        if kind == "preference":
+            verb = "不喜欢" if predicate == "dislikes" else "喜欢"
+            return f"你{verb}" + "、".join(values) + "。"
+    prompts = {
+        ("personal", "居住地"): "你还没有告诉我你住在哪里。",
+        ("personal", "生日"): "你还没有告诉我你的生日。",
+        ("personal", "职业"): "你还没有告诉我你的职业。",
+        ("preference", "likes"): "你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。",
+        ("preference", "dislikes"): "你还没有告诉我这方面的偏好。",
+    }
+    prompt = prompts.get(route, f"你还没有告诉我谁是你的{predicate}。")
+    return f"{address}，{prompt}"
+
+
 class MockProvider(BaseLLMProvider):
     """No generative model: useful memory Q&A, teaching, roleplay and basic conversation."""
 
     def generate(self, context: Context) -> str:
         text = context.user_text
         address = context.profile.address
+
+        # A direct stored-fact question is the user's explicit request for this turn. Learning is
+        # already applied to the preview context, so "我住在浙江。我住在哪里？" can answer from
+        # the just-learned evidence instead of returning only the teaching acknowledgement.
+        route = fact_query_route(text)
+        if route is not None:
+            return _fact_query_reply(context, route)
+
         if context.learning.acknowledgements:
             natural = _learning_reply(context)
             if natural:
@@ -80,34 +116,6 @@ class MockProvider(BaseLLMProvider):
                 context.profile.gender
             ]
             return f"你保存的性别选择是“{gender}”，我称呼你为{address}。"
-
-        # Explicit memory questions take priority over tone. "谢谢，我住在哪里？" should
-        # answer the saved profile fact instead of being swallowed by the gentle-tone policy.
-        route = fact_query_route(text)
-        if route is not None:
-            kind, predicate = route
-            values = [f.value for f in context.facts if f.kind == kind and f.predicate == predicate]
-            if values:
-                if (kind, predicate) == ("personal", "居住地"):
-                    return f"你告诉过我，你住在{values[0]}。"
-                if (kind, predicate) == ("personal", "生日"):
-                    return f"你告诉过我，你的生日是{values[0]}。"
-                if (kind, predicate) == ("personal", "职业"):
-                    return f"你告诉过我，你的职业是{values[0]}。"
-                if kind == "relation":
-                    return f"我记得你的{predicate}有：" + "、".join(values) + "。"
-                if kind == "preference":
-                    verb = "不喜欢" if predicate == "dislikes" else "喜欢"
-                    return f"你{verb}" + "、".join(values) + "。"
-            prompts = {
-                ("personal", "居住地"): "你还没有告诉我你住在哪里。",
-                ("personal", "生日"): "你还没有告诉我你的生日。",
-                ("personal", "职业"): "你还没有告诉我你的职业。",
-                ("preference", "likes"): "你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。",
-                ("preference", "dislikes"): "你还没有告诉我这方面的偏好。",
-            }
-            prompt = prompts.get(route, f"你还没有告诉我谁是你的{predicate}。")
-            return f"{address}，{prompt}"
 
         if any(w in text for w in ("喜欢什么", "讨厌什么", "喜好")):
             negative = "不喜欢" in text or "讨厌" in text
