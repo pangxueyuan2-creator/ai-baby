@@ -16,6 +16,7 @@ from ai_baby.export import (
 )
 from ai_baby.memory import MemoryError, MemoryStore
 from ai_baby.models import Profile
+from ai_baby.privacy_checksum import checksum_manifest_path, verify_checksum_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,22 +78,42 @@ def test_include_history_and_inactive_are_explicit_opt_ins(tmp_path):
     assert {fact["active"] for fact in cat_facts} == {0, 1}
 
 
-def test_write_export_uses_private_exclusive_file_and_never_overwrites(tmp_path):
+def test_write_export_uses_private_exclusive_files_and_valid_checksum(tmp_path):
     path = make_database(tmp_path)
     output = tmp_path / "exports" / "baby.json"
 
     write_privacy_export(path, output, pretty=True)
+    manifest = checksum_manifest_path(output)
     original = output.read_bytes()
+    manifest_original = manifest.read_bytes()
 
     parsed = json.loads(output.read_text(encoding="utf-8"))
     assert parsed["format"] == FORMAT_NAME
     assert parsed["options"]["include_history"] is False
+    assert verify_checksum_manifest(output, required=True) is not None
     if os.name != "nt":
         assert stat.S_IMODE(output.stat().st_mode) == 0o600
+        assert stat.S_IMODE(manifest.stat().st_mode) == 0o600
 
     with pytest.raises(ValueError, match="不会改写"):
         write_privacy_export(path, output)
     assert output.read_bytes() == original
+    assert manifest.read_bytes() == manifest_original
+
+
+def test_export_never_overwrites_existing_checksum_and_cleans_new_output(tmp_path):
+    path = make_database(tmp_path)
+    output = tmp_path / "exports" / "baby.json"
+    manifest = checksum_manifest_path(output)
+    manifest.parent.mkdir(parents=True)
+    sentinel = b"existing checksum owner data\n"
+    manifest.write_bytes(sentinel)
+
+    with pytest.raises(ValueError, match="校验文件已存在"):
+        write_privacy_export(path, output)
+
+    assert not output.exists()
+    assert manifest.read_bytes() == sentinel
 
 
 def test_export_rejects_database_as_destination_without_modifying_it(tmp_path):
@@ -114,6 +135,7 @@ def test_export_rejects_corrupt_database_before_creating_output(tmp_path):
         write_privacy_export(path, output)
 
     assert not output.exists()
+    assert not checksum_manifest_path(output).exists()
 
 
 def test_export_cli_ignores_unrelated_provider_configuration(tmp_path):
@@ -149,5 +171,7 @@ def test_export_cli_ignores_unrelated_provider_configuration(tmp_path):
     status_payload = json.loads(result.stdout)
     assert status_payload["status"] == "ok"
     assert status_payload["history_included"] is False
+    assert status_payload["checksum"] == verify_checksum_manifest(output, required=True)
+    assert status_payload["checksum_manifest"] == str(checksum_manifest_path(output))
     export_payload = json.loads(output.read_text(encoding="utf-8"))
     assert "history" not in export_payload
