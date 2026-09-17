@@ -200,9 +200,7 @@ def extract_extended(sentence: str) -> MemoryCandidate | None:
         r"(?:其实)?我(?:现在)?(?:也|还|又|还是)?(?:从小)?(?:就)?(?:一直)?(?:特别|很|超|好|挺)?喜欢(.+)",
         sentence,
     )
-    intense = re.fullmatch(
-        r"(?:其实)?(?:也|还|又|还是)?(?:特别|很|超|好|挺)喜欢(.+)", sentence
-    )
+    intense = re.fullmatch(r"(?:其实)?(?:也|还|又|还是)?(?:特别|很|超|好|挺)喜欢(.+)", sentence)
     favorite = re.fullmatch(r"(?:其实)?(.+?)是我最喜欢的(?:水果|动物|食物|颜色)", sentence)
     address = re.fullmatch(r"我(?:现在住(?:在)?|住在)(.+)", sentence)
     home_address = re.fullmatch(r"我家在(.+)", sentence)
