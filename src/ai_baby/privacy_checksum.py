@@ -70,15 +70,23 @@ def _manifest_checksum(export: Path, *, required: bool) -> str | None:
     return expected.casefold()
 
 
-def verify_checksum_manifest(export: Path, *, required: bool = False) -> str | None:
-    """Verify the adjacent checksum when present; optionally require it."""
+def verify_checksum_manifest(
+    export: Path,
+    *,
+    required: bool = False,
+    content: bytes | None = None,
+) -> str | None:
+    """Verify the sidecar against supplied bytes or the file currently on disk."""
     expected = _manifest_checksum(export, required=required)
     if expected is None:
         return None
-    try:
-        actual = sha256_file(export)
-    except OSError as exc:
-        raise ValueError("无法读取隐私导出文件以验证 SHA-256。") from exc
+    if content is None:
+        try:
+            actual = sha256_file(export)
+        except OSError as exc:
+            raise ValueError("无法读取隐私导出文件以验证 SHA-256。") from exc
+    else:
+        actual = hashlib.sha256(content).hexdigest()
     if not hmac.compare_digest(actual, expected):
         raise ValueError("隐私导出 SHA-256 校验失败；文件可能损坏或已被修改。")
     return actual
