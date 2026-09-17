@@ -1,6 +1,6 @@
 """Honest offline baseline using retrieved evidence and composable response policies."""
 
-from ..conversation import Context, is_recall_query
+from ..conversation import Context, fact_query_route, is_recall_query
 from .base import BaseLLMProvider
 
 
@@ -23,6 +23,30 @@ class MockProvider(BaseLLMProvider):
                 context.profile.gender
             ]
             return f"你保存的性别选择是“{gender}”，我称呼你为{address}。"
+
+        # Explicit memory questions take priority over tone. "谢谢，我住在哪里？" should
+        # answer the saved profile fact instead of being swallowed by the gentle-tone policy.
+        route = fact_query_route(text)
+        if route is not None:
+            kind, predicate = route
+            values = [f.value for f in context.facts if f.kind == kind and f.predicate == predicate]
+            if values:
+                if (kind, predicate) == ("personal", "居住地"):
+                    return f"你告诉过我，你住在{values[0]}。"
+                if (kind, predicate) == ("personal", "生日"):
+                    return f"你告诉过我，你的生日是{values[0]}。"
+                if (kind, predicate) == ("personal", "职业"):
+                    return f"你告诉过我，你的职业是{values[0]}。"
+                if (kind, predicate) == ("relation", "朋友"):
+                    return "我记得你的朋友有：" + "、".join(values) + "。"
+            prompts = {
+                ("personal", "居住地"): "你还没有告诉我你住在哪里。",
+                ("personal", "生日"): "你还没有告诉我你的生日。",
+                ("personal", "职业"): "你还没有告诉我你的职业。",
+                ("relation", "朋友"): "你还没有告诉我谁是你的朋友。",
+            }
+            return f"{address}，{prompts[route]}"
+
         if any(w in text for w in ("喜欢什么", "讨厌什么", "喜好")):
             negative = "不喜欢" in text or "讨厌" in text
             predicate = "dislikes" if negative else "likes"
@@ -32,23 +56,13 @@ class MockProvider(BaseLLMProvider):
                 if values
                 else f"{address}，你还没有告诉我这方面的偏好，可以说“我喜欢草莓”。"
             )
-        if context.tone in {"teasing", "playful", "hostile", "ambiguous", "distress", "gentle"}:
-            return {
-                "teasing": f"又逗我，{address} 😼 我也会慢慢学会的。",
-                "playful": f"{address}，一起玩吧！你给我一个词，我试着想起你教过我的事。",
-                "hostile": "我们可以换一种说法交流。你可以直接告诉我哪里回答错了。",
-                "ambiguous": "我还不太确定你是不是在和我开玩笑。你是在逗我吗？",
-                "distress": f"{address}，听起来今天不太轻松。愿意说说发生了什么吗？",
-                "gentle": f"谢谢你，{address}。我们慢慢学，接着聊你想分享的内容。",
-            }[context.tone]
-        if context.tone == "reserved":
-            return "好，我们先观察，再慢慢讨论。"
         if is_recall_query(text):
             if context.episodes:
                 return "我找到以前保存的经历：" + "；".join(
                     e["summary"] for e in context.episodes[:2]
                 )
             return "我在本地记忆中没有找到这段共同经历，不能确定我们以前是否谈过。"
+
         subjects = [
             f
             for f in context.facts
@@ -68,6 +82,18 @@ class MockProvider(BaseLLMProvider):
             return (
                 "你告诉过我：" + "；".join(f"你的{f.predicate}是{f.value}" for f in personal) + "。"
             )
+
+        if context.tone in {"teasing", "playful", "hostile", "ambiguous", "distress", "gentle"}:
+            return {
+                "teasing": f"又逗我，{address} 😼 我也会慢慢学会的。",
+                "playful": f"{address}，一起玩吧！你给我一个词，我试着想起你教过我的事。",
+                "hostile": "我们可以换一种说法交流。你可以直接告诉我哪里回答错了。",
+                "ambiguous": "我还不太确定你是不是在和我开玩笑。你是在逗我吗？",
+                "distress": f"{address}，听起来今天不太轻松。愿意说说发生了什么吗？",
+                "gentle": f"谢谢你，{address}。我们慢慢学，接着聊你想分享的内容。",
+            }[context.tone]
+        if context.tone == "reserved":
+            return "好，我们先观察，再慢慢讨论。"
         if "经历" in text or "发生过" in text or "成长" in text:
             summaries = [e["summary"] for e in context.episodes]
             return f"我现在处于 {context.growth.stage} 阶段。最近记下了：" + "；".join(summaries)
@@ -75,10 +101,9 @@ class MockProvider(BaseLLMProvider):
             return f"{address}你好！我在这里，可以继续聊今天的新鲜事。"
         if any(w in text for w in ("再见", "晚安")):
             return f"{address}，下次见。记忆已经保存在本地，你可以随时退出。"
-        if context.facts:
-            fact = context.facts[0]
-            origin = "你教过我" if fact.kind in {"world", "knowledge"} else "你告诉过我"
-            return origin + "的一条相关记录：" + fact.text() + "。"
+
+        # Never label an arbitrary retrieved row as "related" just because lexical retrieval
+        # happened to return something. If no answer policy has evidence, admit the gap.
         curious = (
             "可以用“学习：事物是……”教我。"
             if context.growth.stage in {"newborn", "baby"}
