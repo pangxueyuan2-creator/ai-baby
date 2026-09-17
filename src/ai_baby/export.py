@@ -24,7 +24,9 @@ def _default_data_dir() -> Path:
     return Path(os.environ.get("AI_BABY_DATA_DIR", str(Path.home() / ".ai-baby"))).expanduser()
 
 
-def _row_dicts(db: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+def _row_dicts(
+    db: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()
+) -> list[dict[str, Any]]:
     rows = db.execute(sql, params).fetchall()
     return [dict(row) for row in rows]
 
@@ -167,14 +169,15 @@ def write_privacy_export(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "只读导出 AI Baby 的用户可见资料、状态、记忆与事件为版本化 JSON；"
-            "默认不包含原始聊天记录"
+            "只读导出 AI Baby 的用户可见资料、状态、记忆与事件为版本化 JSON；默认不包含原始聊天记录"
         )
     )
     location = parser.add_mutually_exclusive_group()
     location.add_argument("--data-dir", type=Path, help="宝宝数据目录；导出其中 baby.sqlite3")
     location.add_argument("--database", type=Path, help="直接导出指定 AI Baby SQLite 文件")
-    parser.add_argument("--output", type=Path, required=True, help="新 JSON 文件路径；绝不覆盖已有文件")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="新 JSON 文件路径；绝不覆盖已有文件"
+    )
     parser.add_argument(
         "--include-history",
         action="store_true",
