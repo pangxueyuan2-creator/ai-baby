@@ -57,4 +57,5 @@ jobs:
           "$RUNNER_TEMP/ai-baby-wheel/bin/python" -m pip install --no-deps dist/*.whl
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby" --help
+          "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-doctor" --help
           "$RUNNER_TEMP/ai-baby-wheel/bin/ai-baby-restore" --help
