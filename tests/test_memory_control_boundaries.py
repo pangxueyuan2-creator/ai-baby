@@ -108,7 +108,9 @@ def test_failed_export_stream_creation_closes_descriptor(baby, tmp_path, monkeyp
 
 
 @pytest.mark.parametrize(
-    "value", [str(2**63), "9" * 100, "9" * 1900], ids=["sqlite-overflow", "100-digits", "1900-digits"]
+    "value",
+    [str(2**63), "9" * 100, "9" * 1900],
+    ids=["sqlite-overflow", "100-digits", "1900-digits"],
 )
 def test_natural_confirmation_rejects_oversized_id_without_mutation(baby, value):
     baby.chat("我可能喜欢橘猫")
