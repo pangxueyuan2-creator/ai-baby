@@ -137,7 +137,7 @@ class Learner:
             result.fact_ids.append(fact_id)
             self.memory.episode(
                 "important" if candidate.kind == "event" else "learning",
-                " · ".join(fields[1:]),
+                candidate.value if candidate.kind == "event" else " · ".join(fields[1:]),
                 fact_id=fact_id,
             )
         result.acknowledgements.append(
