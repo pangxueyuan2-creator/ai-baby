@@ -129,9 +129,7 @@ class MockProvider(BaseLLMProvider):
         # that the answer is unknown instead of presenting an unrelated relationship as evidence.
         compact = text.strip().strip("。！？!? ")
         exact_mentions = [
-            fact
-            for fact in context.facts
-            if compact in {fact.value + "呢", fact.subject + "呢"}
+            fact for fact in context.facts if compact in {fact.value + "呢", fact.subject + "呢"}
         ]
         if exact_mentions:
             fact = exact_mentions[0]
