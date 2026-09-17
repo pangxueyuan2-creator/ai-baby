@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from ai_baby import importer
 from ai_baby.export import build_privacy_export, write_privacy_export
 from ai_baby.importer import EXIT_OK, import_privacy_export
 from ai_baby.memory import MemoryStore
@@ -114,6 +115,23 @@ def test_import_never_overwrites_existing_baby(tmp_path):
         import_privacy_export(source, target.parent)
 
     assert target.read_bytes() == before
+
+
+def test_import_race_never_deletes_a_destination_created_by_someone_else(tmp_path, monkeypatch):
+    source = make_export(tmp_path)
+    target = tmp_path / "raced" / "baby.sqlite3"
+    sentinel = b"created by another process"
+
+    def lose_reservation_race(path: Path) -> None:
+        path.write_bytes(sentinel)
+        raise FileExistsError(path)
+
+    monkeypatch.setattr(importer, "reserve_private_file", lose_reservation_race)
+
+    with pytest.raises(ValueError, match="已经包含 baby.sqlite3"):
+        import_privacy_export(source, target.parent)
+
+    assert target.read_bytes() == sentinel
 
 
 def test_broken_episode_fact_reference_rolls_back_and_removes_new_database(tmp_path):
