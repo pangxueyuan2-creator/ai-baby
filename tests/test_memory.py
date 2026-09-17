@@ -43,7 +43,7 @@ def test_corrupt_state_fails_without_reset(store):
     store.db.execute("INSERT INTO state VALUES('growth','{broken')")
     with pytest.raises(MemoryError):
         Baby(store)
-    assert store.db.execute("SELECT value FROM state").fetchone()[0] == "{broken"
+    assert store.db.execute("SELECT value FROM state WHERE key='growth'").fetchone()[0] == "{broken"
 
 
 def test_transaction_rolls_back(store):

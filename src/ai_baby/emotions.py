@@ -13,5 +13,6 @@ def update(previous: Emotion, tone: str, learned: bool) -> Emotion:
         "ambiguous": ("nervous", 0.35),
         "distress": ("sad", 0.40),
         "neutral": ("curious", 0.40) if learned else ("calm", 0.20),
+        "reserved": ("calm", 0.25),
     }[tone]
     return Emotion(target, round(previous.intensity * 0.75 + intensity * 0.25, 4))

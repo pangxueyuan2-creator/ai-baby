@@ -7,10 +7,11 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .baby import Baby
+from . import journal, management
+from .baby import Baby, TurnConflict
 from .config import Config
 from .memory import MemoryError, MemoryStore
-from .models import Emotion, Growth, Relationship, clean_text, record, safe_output
+from .models import Emotion, Growth, PersonalityState, Relationship, clean_text, record, safe_output
 from .providers import MockProvider
 from .providers.openai_compatible import OpenAICompatibleProvider
 
@@ -28,6 +29,13 @@ HELP = """
 /memories    查看最近 20 条有效事实
 /events      查看最近 10 条重要经历
 /backup      在数据目录创建一致性数据库备份
+/personality 查看长期形成的个体人格（模拟状态）
+/journal     巩固经历并查看最近成长日记
+/export      将角色数据导出到数据目录/exports（含私人信息）
+/forget ID   让指定事实失效，并清理对话和日记以避免再次想起
+/confirm ID  确认候选记忆；/reject ID 忽略候选
+/candidates  查看最多三条待确认记忆
+/baby-name 名字  给宝宝取名
 /help        查看帮助
 """.strip()
 
@@ -72,6 +80,8 @@ def command(baby: Baby, text: str) -> bool:
     name, _, argument = text.partition(" ")
     memory = baby.memory
     if name in {"/quit", "/exit"}:
+        with memory.transaction():
+            journal.consolidate(memory, force=True)
         return False
     if name == "/help":
         print(HELP)
@@ -96,6 +106,45 @@ def command(baby: Baby, text: str) -> bool:
                 f"{e['created_at']} [{e['kind']}] {e['summary']}" for e in memory.episodes(10)
             )
         )
+    elif name == "/personality":
+        print(
+            json.dumps(
+                record(memory.load_state("personality", PersonalityState)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    elif name == "/journal":
+        with memory.transaction():
+            journal.consolidate(memory, force=True)
+        print("\n".join(j["summary"] for j in journal.recent(memory)) or "还没有新的经历。")
+    elif name == "/baby-name":
+        baby_name = clean_text(argument, 80)
+        with memory.transaction():
+            memory.set_setting("baby_name", baby_name)
+        print("宝宝名字已保存：" + baby_name)
+    elif name == "/forget":
+        print(
+            "记忆已失效；历史对话和日记已清理。"
+            if management.forget(memory, int(argument))
+            else "没有找到有效的事实 ID。"
+        )
+    elif name == "/confirm":
+        print("AI 宝宝：" + baby.chat(f"确认记忆 {int(argument)}").text)
+    elif name == "/candidates":
+        rows = memory.db.execute(
+            "SELECT id,kind,subject,predicate,value FROM candidates ORDER BY id DESC LIMIT 3"
+        ).fetchall()
+        print(json.dumps([dict(row) for row in rows], ensure_ascii=False, indent=2))
+    elif name == "/reject":
+        with memory.transaction():
+            memory.db.execute("DELETE FROM candidates WHERE id=?", (int(argument),))
+        print("候选已忽略。")
+    elif name == "/export":
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        target = memory.path.parent / "exports" / f"baby-{stamp}.json"
+        management.export_data(memory, target)
+        print(f"已导出私人角色数据（请勿公开上传）：{target}")
     elif name == "/backup":
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         target = memory.path.parent / "backups" / f"baby-{stamp}.sqlite3"
@@ -144,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
                 if reply.warning:
                     print(safe_output(reply.warning))
                 print("AI 宝宝：" + reply.text)
-            except ValueError as exc:
+            except (ValueError, TurnConflict) as exc:
                 print(safe_output(str(exc)))
             except sqlite3.OperationalError:
                 print("记忆保存失败或被另一进程占用；本轮未提交。请关闭另一实例并检查磁盘后重试。")

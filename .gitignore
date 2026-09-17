@@ -19,4 +19,5 @@ dist/
 .coverage
 htmlcov/
 private-exports/
+exports/
 .DS_Store

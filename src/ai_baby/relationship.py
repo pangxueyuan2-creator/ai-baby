@@ -22,6 +22,8 @@ def classify(text: str, state: Relationship) -> str:
         return "playful"
     if any(w in text for w in ("谢谢", "做得好", "真棒", "别怕", "慢慢来", "喜欢你")):
         return "gentle"
+    if any(w in text for w in ("谨慎一点", "先别急", "先观察", "保持距离")):
+        return "reserved"
     return "neutral"
 
 
@@ -35,6 +37,7 @@ def update(state: Relationship, tone: str) -> Relationship:
         "ambiguous": (0.0, 0.0, 0.15, 0.0, 0.0),
         "distress": (0.04, 0.05, 0.15, 0.05, 0.0),
         "neutral": (0.05, 0.04, 0.20, 0.04, 0.01),
+        "reserved": (0.0, 0.01, 0.15, 0.01, 0.0),
     }
     result = replace(state)
     for name, delta in zip(

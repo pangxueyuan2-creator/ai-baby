@@ -31,6 +31,8 @@ class Config:
     model: str = ""
     timeout: float = 30.0
     allow_external: bool = False
+    max_retries: int = 0
+    retry_backoff: float = 0.25
 
     def validate(self) -> "Config":
         """Validate before any data is sent to an external provider."""
@@ -38,6 +40,8 @@ class Config:
             raise ValueError("未知 provider；请选择 mock 或 openai-compatible。")
         if not 1 <= self.timeout <= 120:
             raise ValueError("超时时间必须在 1–120 秒之间。")
+        if self.max_retries not in {0, 1, 2} or not 0 <= self.retry_backoff <= 2:
+            raise ValueError("重试次数必须在 0–2，退避时间必须在 0–2 秒。")
         if self.provider == "openai-compatible":
             if not self.allow_external:
                 raise ValueError("外部模式需显式设置 AI_BABY_ALLOW_EXTERNAL=true。")
@@ -47,7 +51,7 @@ class Config:
                 raise ValueError("API 地址需要 HTTPS；仅回环本地服务允许 HTTP。")
             if url.username or url.password or url.query or url.fragment:
                 raise ValueError("API 地址不能包含凭据、查询串或片段。")
-            if not self.model.strip() or not self.api_key.strip():
+            if not self.model.strip() or (not local and not self.api_key.strip()):
                 raise ValueError("外部模式需要 AI_BABY_MODEL 和 AI_BABY_API_KEY。")
             if any(ord(c) < 32 or ord(c) == 127 for c in self.api_key):
                 raise ValueError("API key 格式无效。")
@@ -66,4 +70,6 @@ class Config:
             model=values.get("AI_BABY_MODEL", ""),
             timeout=float(values.get("AI_BABY_TIMEOUT", "30")),
             allow_external=values.get("AI_BABY_ALLOW_EXTERNAL", "false").lower() == "true",
+            max_retries=int(values.get("AI_BABY_MAX_RETRIES", "0")),
+            retry_backoff=float(values.get("AI_BABY_RETRY_BACKOFF", "0.25")),
         ).validate()

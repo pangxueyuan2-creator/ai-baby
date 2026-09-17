@@ -3,7 +3,7 @@
 import math
 from dataclasses import replace
 
-from .models import Growth, Relationship
+from .models import Growth, GrowthMetrics, Relationship
 
 STAGES = ("newborn", "baby", "child", "growing", "mature")
 THRESHOLDS = (0, 12, 30, 52, 75)
@@ -51,26 +51,27 @@ TRAITS = {
 }
 
 
-def update(state: Growth, counts: dict[str, int], relation: Relationship, elapsed: float) -> Growth:
+def update(state: Growth, counts: GrowthMetrics, relation: Relationship, elapsed: float) -> Growth:
     """Time is active session time, capped per turn; wall-clock absence adds nothing."""
     result = replace(state)
     result.interactions += 1
     result.active_seconds += max(0.0, min(300.0, elapsed)) if math.isfinite(elapsed) else 0.0
-    result.knowledge = counts["knowledge"]
-    result.memories = counts["memories"]
-    result.events = counts["events"]
+    result.knowledge = counts.world_knowledge
+    result.memories = counts.episodic_memories
+    result.events = counts.important_events
 
     def saturate(value: float, scale: float) -> float:
         return 1.0 - math.exp(-value / scale)
 
     depth = (relation.trust + relation.closeness + relation.familiarity) / 300
     score = (
-        30 * saturate(result.interactions, 400)
+        20 * saturate(result.interactions, 400)
         + 15 * saturate(result.active_seconds, 36000)
-        + 25 * saturate(result.knowledge, 100)
+        + 25 * saturate(counts.knowledge_diversity, 100)
         + 10 * saturate(result.memories, 100)
         + 15 * depth
         + 5 * saturate(result.events, 30)
+        + 10 * min(1.0, counts.interaction_diversity / 5)
     )
     result.score = round(score, 3)
     # Require breadth: repeated empty chatter alone cannot reach mature.
@@ -78,7 +79,10 @@ def update(state: Growth, counts: dict[str, int], relation: Relationship, elapse
     eligible = [
         i
         for i, (threshold, (turns, facts)) in enumerate(zip(THRESHOLDS, gates))
-        if score >= threshold and result.interactions >= turns and result.knowledge >= facts
+        if score >= threshold
+        and result.interactions >= turns
+        and counts.knowledge_diversity >= facts
+        and counts.interaction_diversity >= min(i, 4)
     ]
     result.stage = STAGES[max(STAGES.index(state.stage), max(eligible))]
     return result

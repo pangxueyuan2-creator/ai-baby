@@ -9,10 +9,12 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
+from .migrations import SCHEMA_VERSION as SCHEMA_VERSION
+from .migrations import initialize
+from .migrations.v2 import novelty_key
 from .models import Fact, Profile, record
 
 T = TypeVar("T")
-SCHEMA_VERSION = 1
 
 
 class MemoryError(RuntimeError):
@@ -72,12 +74,8 @@ class MemoryStore:
             self.connection.execute("PRAGMA foreign_keys=ON")
             if self.connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise MemoryError("数据库完整性检查未通过。")
-            version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, SCHEMA_VERSION}:
-                raise MemoryError("数据库来自更新版本，请升级程序；原文件未重置。")
-            self.connection.executescript(SCHEMA)
-            self.connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-        except (sqlite3.Error, OSError, MemoryError) as exc:
+            initialize(self.connection, path, SCHEMA)
+        except (sqlite3.Error, OSError, ValueError, RuntimeError) as exc:
             self.close()
             raise MemoryError(
                 "无法打开记忆数据库。请检查权限、磁盘或备份；保留原文件，"
@@ -101,6 +99,19 @@ class MemoryStore:
             if self.db.in_transaction:
                 self.db.execute("ROLLBACK")
             raise
+
+    @contextmanager
+    def preview(self) -> Iterator[None]:
+        """Evaluate local effects under a short lock, always rolling them back."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        finally:
+            if self.db.in_transaction:
+                self.db.execute("ROLLBACK")
+
+    def revision(self) -> int:
+        return self.db.execute("SELECT value FROM revision WHERE id=1").fetchone()[0]
 
     def close(self) -> None:
         if self.connection is not None:
@@ -141,7 +152,7 @@ class MemoryStore:
                         raise ValueError("invalid numeric state")
                 elif not isinstance(value, str):
                     raise ValueError("invalid string state")
-            if key == "relationship" and any(v > 100 for v in data.values()):
+            if key in {"relationship", "personality"} and any(v > 100 for v in data.values()):
                 raise ValueError("invalid relationship")
             if key == "emotion" and (
                 data["label"]
@@ -158,7 +169,7 @@ class MemoryStore:
             }:
                 raise ValueError("invalid stage")
             return cls(**data)
-        except (ValueError, TypeError, KeyError) as exc:
+        except (ValueError, TypeError, KeyError, OverflowError) as exc:
             raise MemoryError("保存的角色状态格式损坏；请从备份恢复。原数据未重置。") from exc
 
     def save_state(self, key: str, value: Any) -> None:
@@ -196,8 +207,8 @@ class MemoryStore:
             self.db.execute("UPDATE facts SET active=1 WHERE id=?", (fact_id,))
         else:
             cursor = self.db.execute(
-                "INSERT INTO facts(kind,subject,predicate,value,normalized) VALUES(?,?,?,?,?)",
-                (kind, subject, predicate, value, normalized),
+                "INSERT INTO facts(kind,subject,predicate,value,normalized,novelty) VALUES(?,?,?,?,?,?)",
+                (kind, subject, predicate, value, normalized, novelty_key(subject + value)),
             )
             fact_id = cursor.lastrowid
             self.db.executemany(
@@ -205,6 +216,68 @@ class MemoryStore:
                 [(t, fact_id) for t in tokens(subject + predicate + value)],
             )
         return True
+
+    def retrieve_episodes(self, query: str, limit: int = 4) -> list[dict[str, Any]]:
+        """Indexed relevance + importance + gently bounded recency, not latest-only."""
+        query_tokens = sorted(tokens(query), key=lambda t: (-len(t), t))[:80]
+        limit = max(1, min(limit, 10))
+        if not query_tokens:
+            return self.episodes(limit)
+        marks = ",".join("?" for _ in query_tokens)
+        # The 0..1 recency bonus cannot overwhelm multiple meaningful matching tokens.
+        rows = self.db.execute(
+            "SELECT e.id,e.kind,e.summary,e.importance,e.created_at, "
+            "SUM(length(t.token)*length(t.token)) + 6*e.importance + "
+            "1.0/(1.0+max(0,julianday('now')-julianday(e.created_at))/30) AS score "
+            "FROM episode_tokens t JOIN episodes e ON e.id=t.episode_id "
+            f"WHERE e.active=1 AND t.token IN ({marks}) GROUP BY e.id "
+            "ORDER BY score DESC,e.id DESC LIMIT ?",
+            (*query_tokens, limit),
+        ).fetchall()
+        return [
+            {k: row[k] for k in ("id", "kind", "summary", "importance", "created_at")}
+            for row in rows
+        ]
+
+    def setting(self, key: str, default: str = "") -> str:
+        row = self.db.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        self.db.execute("INSERT OR REPLACE INTO settings VALUES(?,?)", (key, value))
+
+    def experience(self, category: str, text: str) -> bool:
+        """Novel experience signatures are local data; no per-repetition rewards."""
+        import hashlib
+
+        signature = hashlib.sha256(novelty_key(text).encode()).hexdigest()
+        cursor = self.db.execute(
+            "INSERT OR IGNORE INTO experience VALUES(?,?)", (category, signature)
+        )
+        return cursor.rowcount > 0
+
+    def growth_metrics(self, relation: Any, active_seconds: float):
+        from .models import GrowthMetrics
+
+        counts = self.counts()
+        return GrowthMetrics(
+            world_knowledge=self.db.execute(
+                "SELECT count(*) FROM facts WHERE active=1 AND kind='world'"
+            ).fetchone()[0],
+            personal_memories=self.db.execute(
+                "SELECT count(*) FROM facts WHERE active=1 AND kind IN ('preference','personal','relation')"
+            ).fetchone()[0],
+            episodic_memories=counts["memories"],
+            relationship_depth=(relation.trust + relation.closeness + relation.familiarity) / 300,
+            interaction_diversity=self.db.execute(
+                "SELECT count(DISTINCT category) FROM experience"
+            ).fetchone()[0],
+            active_seconds=active_seconds,
+            important_events=counts["events"],
+            knowledge_diversity=self.db.execute(
+                "SELECT count(DISTINCT novelty) FROM facts WHERE active=1 AND kind='world' AND length(novelty)>=3"
+            ).fetchone()[0],
+        )
 
     def retrieve(self, query: str, limit: int = 8) -> list[Fact]:
         """Bound candidates in SQL; prefer exact subject and longer token overlap."""
@@ -236,14 +309,30 @@ class MemoryStore:
         ).fetchall()
         return [Fact(**dict(r)) for r in rows]
 
-    def episode(self, kind: str, summary: str) -> None:
-        self.db.execute("INSERT INTO episodes(kind,summary) VALUES(?,?)", (kind, summary[:500]))
+    def episode(
+        self, kind: str, summary: str, importance: float | None = None, fact_id: int | None = None
+    ) -> None:
+        if importance is None:
+            importance = {"birth": 0.95, "important": 0.95, "milestone": 0.9, "emotion": 0.7}.get(
+                kind, 0.4
+            )
+        if not math.isfinite(importance) or not 0 <= importance <= 1:
+            raise ValueError("importance 必须是 0–1。")
+        summary = summary[:500]
+        cursor = self.db.execute(
+            "INSERT INTO episodes(kind,summary,importance,fact_id) VALUES(?,?,?,?)",
+            (kind, summary, importance, fact_id),
+        )
+        self.db.executemany(
+            "INSERT INTO episode_tokens VALUES(?,?)",
+            [(t, cursor.lastrowid) for t in tokens(summary)],
+        )
 
     def episodes(self, limit: int = 4) -> list[dict[str, Any]]:
         return [
             dict(r)
             for r in self.db.execute(
-                "SELECT kind,summary,created_at FROM episodes ORDER BY id DESC LIMIT ?",
+                "SELECT id,kind,summary,importance,created_at FROM episodes WHERE active=1 ORDER BY id DESC LIMIT ?",
                 (max(1, min(limit, 50)),),
             )
         ]
@@ -262,11 +351,15 @@ class MemoryStore:
 
     def counts(self) -> dict[str, int]:
         return {
-            "knowledge": self.db.execute("SELECT count(*) FROM facts WHERE active=1").fetchone()[0],
-            "events": self.db.execute(
-                "SELECT count(*) FROM episodes WHERE kind IN ('important','emotion','milestone')"
+            "knowledge": self.db.execute(
+                "SELECT count(*) FROM facts WHERE active=1 AND kind IN ('world','knowledge')"
             ).fetchone()[0],
-            "memories": self.db.execute("SELECT count(*) FROM episodes").fetchone()[0],
+            "events": self.db.execute(
+                "SELECT count(*) FROM episodes WHERE active=1 AND kind IN ('important','emotion','milestone')"
+            ).fetchone()[0],
+            "memories": self.db.execute("SELECT count(*) FROM episodes WHERE active=1").fetchone()[
+                0
+            ],
         }
 
     def backup(self, destination: Path) -> None:
@@ -275,8 +368,11 @@ class MemoryStore:
         with destination.open("xb"):
             pass
         try:
-            with sqlite3.connect(destination) as target:
+            target = sqlite3.connect(destination)
+            try:
                 self.db.backup(target)
+            finally:
+                target.close()
         except BaseException:
             destination.unlink(missing_ok=True)
             raise

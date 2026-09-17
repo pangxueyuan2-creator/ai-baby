@@ -13,7 +13,7 @@ class MockProvider(BaseLLMProvider):
         if context.learning.acknowledgements:
             return address + "，" + "；".join(context.learning.acknowledgements[:4]) + "。"
         if any(w in text for w in ("你是谁", "你是人", "真实感受", "有意识")):
-            return f"{address}，我是 AI 宝宝，一个软件角色，不是真实人类。我的情绪和成长都是模拟状态。我可以从我们的交流中保存记忆。"
+            return f"{address}，我是{context.baby_name}，一个软件角色，不是真实人类。我的情绪和成长都是模拟状态。我可以从我们的交流中保存记忆。"
         if any(w in text for w in ("我叫什么", "我的名字", "我是谁")):
             return f"你叫{context.profile.name}，是照顾我的人，我称呼你为{address}。"
         if any(w in text for w in ("我的性别", "我是男", "我是女")):
@@ -39,6 +39,10 @@ class MockProvider(BaseLLMProvider):
                 "distress": f"{address}，听起来今天不太轻松。愿意说说发生了什么吗？",
                 "gentle": f"谢谢你，{address}。我们慢慢学，你今天想教我什么？",
             }[context.tone]
+        if context.tone == "reserved":
+            return "好，我们先观察，再慢慢讨论。"
+        if any(w in text for w in ("还记得", "第一次", "很久以前")) and context.episodes:
+            return "我找到以前保存的经历：" + "；".join(e["summary"] for e in context.episodes[:2])
         subjects = [
             f
             for f in context.facts
@@ -74,4 +78,11 @@ class MockProvider(BaseLLMProvider):
             if context.growth.stage in {"newborn", "baby"}
             else "我们可以先讲一个例子，再把原因和之前学到的内容联系起来。"
         )
+        if context.personality.caution >= 60:
+            curious = "我想先核对你说的内容。我们可以一步一步来。"
+        elif context.personality.confidence >= 60 and context.growth.stage not in {
+            "newborn",
+            "baby",
+        }:
+            curious = "我愿意试着联系已有的知识，但会区分猜测和记忆。"
         return f"{address}，我听到了你说的“{text[:100]}”。我还没有学过相关知识。{curious}（当前为基础离线模式。）"

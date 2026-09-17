@@ -64,6 +64,34 @@ class Growth:
     stage: str = "newborn"
 
 
+@dataclass
+class PersonalityState:
+    """Individual, learned software traits on 0–100 scales, separate from stage."""
+
+    curiosity: float = 70.0
+    confidence: float = 50.0
+    sociability: float = 50.0
+    caution: float = 50.0
+    playfulness: float = 50.0
+    independence: float = 50.0
+    patience: float = 50.0
+    openness: float = 50.0
+
+
+@dataclass
+class GrowthMetrics:
+    """Auditable growth dimensions; the legacy Growth record remains readable."""
+
+    world_knowledge: int = 0
+    personal_memories: int = 0
+    episodic_memories: int = 0
+    relationship_depth: float = 0.0
+    interaction_diversity: int = 0
+    active_seconds: float = 0.0
+    important_events: int = 0
+    knowledge_diversity: int = 0
+
+
 @dataclass(frozen=True)
 class Fact:
     id: int

@@ -8,6 +8,11 @@ from ..conversation import Context
 class ProviderError(RuntimeError):
     """A redacted provider error that is safe to show to the user."""
 
+    def __init__(self, message: str, *, category: str = "unavailable", retryable: bool = False):
+        super().__init__(message)
+        self.category = category
+        self.retryable = retryable
+
 
 class BaseLLMProvider(ABC):
     @abstractmethod
