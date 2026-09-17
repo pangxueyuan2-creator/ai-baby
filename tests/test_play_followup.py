@@ -43,7 +43,7 @@ def test_tired_small_talk_is_distress_not_a_teaching_form(baby):
 def test_recorded_evening_can_be_asked_without_the_remember_prefix(baby):
     baby.chat("重要事件：今晚我们一起看了星星")
 
-    night = baby.chat("我们昨晚看了什么").text
+    night = baby.chat("我们今晚看了什么").text
     assert "星星" in night
     assert "用户 ·" not in night
     assert "星星" in baby.chat("星星").text
@@ -92,3 +92,83 @@ def test_negative_preference_question_is_not_routed_as_likes():
     assert fact_query_route("我不喜欢什么？") == ("preference", "dislikes")
     assert fact_query_route("我喜欢什么？") == ("preference", "likes")
     assert fact_query_route("What do I like?") == ("preference", "likes")
+
+
+def test_relation_prefix_does_not_stick_to_the_name(baby):
+    baby.chat("关系：王老师是我的老师")
+    assert [f.value for f in baby.memory.facts() if f.kind == "relation"] == ["王老师"]
+    reply = baby.chat("王老师呢").text
+    assert "王老师" in reply
+    assert "关系：" not in reply
+
+
+def test_intensifier_like_without_pronoun_is_learned(baby):
+    baby.chat("超喜欢草莓。")
+    assert [f.value for f in baby.memory.facts("likes")] == ["草莓"]
+
+
+def test_also_like_after_comma_is_learned(baby):
+    baby.chat("我喜欢奶茶，也喜欢漫画。")
+    values = {f.value for f in baby.memory.facts("likes")}
+    assert values == {"奶茶", "漫画"}
+
+
+def test_coordinated_dislikes_split_and_do_not_duplicate(baby):
+    baby.chat("我不喜欢辣椒。")
+    baby.chat("我不喜欢辣椒和早起。")
+    assert {f.value for f in baby.memory.facts("dislikes")} == {"辣椒", "早起"}
+    reply = baby.chat("我不喜欢什么？").text
+    assert "辣椒" in reply and "早起" in reply
+    assert "辣椒和早起" not in reply
+
+
+def test_preference_reversal_removes_the_old_like(baby):
+    baby.chat("超喜欢草莓。")
+    baby.chat("我以前喜欢草莓，但是我现在不喜欢了")
+    assert not baby.memory.facts("likes")
+    assert [f.value for f in baby.memory.facts("dislikes")] == ["草莓"]
+
+
+def test_event_time_window_does_not_mix_nights(baby):
+    baby.chat("重要事件：今晚我们一起看了星星")
+    baby.chat("重要事件：昨天晚上我们一起吃了火锅")
+    night = baby.chat("昨晚看了什么").text
+    assert "火锅" in night
+    assert "星星" not in night
+    tonight = baby.chat("今晚看了什么").text
+    assert "星星" in tonight
+    assert "火锅" not in tonight
+
+
+def test_coarser_residence_does_not_erase_a_more_specific_place(baby):
+    baby.chat("我现在住杭州西湖。")
+    reply = baby.chat("我住在浙江。").text
+    assert "杭州西湖" in reply
+    assert "更具体" in reply
+    assert "杭州西湖" in baby.chat("我住在哪里？").text
+    assert [f.value for f in baby.memory.facts("居住地")] == ["杭州西湖"]
+
+
+def test_identity_statements_are_not_teaching_prompts(baby):
+    named = baby.chat("我叫Alice。").text
+    call = baby.chat("你可以叫我Alice。").text
+    about = baby.chat("你觉得我怎么样").text
+    assert "还没有学过相关知识" not in named + call + about
+    assert "Alice" in named
+    assert "称呼你为妈妈，叫Alice" not in about
+
+
+def test_companion_small_talk_does_not_demand_dolphin_template(baby):
+    lines = [
+        baby.chat("讲个冷笑话").text,
+        baby.chat("你爱我吗").text,
+        baby.chat("我饿了").text,
+        baby.chat("陪我说说话").text,
+        baby.chat("你会唱歌吗").text,
+        baby.chat("背一首诗").text,
+        baby.chat("今天天气怎么样").text,
+        baby.chat("为什么天空是蓝的").text,
+    ]
+    blob = "".join(lines)
+    assert "海豚是哺乳动物" not in blob
+    assert "还没有学过相关知识" not in blob

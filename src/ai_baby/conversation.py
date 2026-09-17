@@ -36,6 +36,27 @@ def is_recall_query(text: str) -> bool:
     return any(word in text for word in ("还记得", "记不记得", "第一次", "很久以前"))
 
 
+_NIGHT_HINTS = ("昨晚", "昨天晚上", "昨天夜里", "昨夜")
+_YESTERDAY_HINTS = ("昨天", "昨日", *_NIGHT_HINTS)
+_TONIGHT_HINTS = ("今晚", "今天晚上", "今夜")
+
+
+def event_time_hints(text: str) -> tuple[str, ...]:
+    """Return lexical time anchors when the user asked about a specific night or day."""
+    compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text)
+    if any(word in compact for word in _NIGHT_HINTS):
+        return _NIGHT_HINTS
+    if any(word in compact for word in ("昨天", "昨日")):
+        return _YESTERDAY_HINTS
+    if any(word in compact for word in _TONIGHT_HINTS):
+        return _TONIGHT_HINTS
+    return ()
+
+
+def matches_event_time(value: str, hints: tuple[str, ...]) -> bool:
+    return True if not hints else any(hint in value for hint in hints)
+
+
 def is_experience_query(text: str) -> bool:
     """Recognize a question about a recorded event without requiring the 还记得 prefix."""
     compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text)
@@ -193,6 +214,7 @@ def build_context(
                 "dislikes" if any(w in folded for w in ("不喜欢", "讨厌", "not like")) else "likes"
             )
             facts = memory.facts(predicate, limit=8)
+    hints = event_time_hints(text)
     if is_recall_query(text):
         topics = recall_topics(text)
         episodes = memory.retrieve_episodes(" ".join(sorted(topics)), 4) if topics else []
@@ -202,13 +224,23 @@ def build_context(
             events = [
                 fact
                 for fact in memory.facts("经历", limit=8)
-                if fact.kind == "event" and topics & tokens(fact.value)
+                if fact.kind == "event"
+                and topics & tokens(fact.value)
+                and matches_event_time(fact.value, hints)
             ]
             facts = facts + [fact for fact in events if fact.id not in {row.id for row in facts}]
     elif is_experience_query(text):
         episodes = memory.retrieve_episodes(text, 4)
-        events = [fact for fact in memory.facts("经历", limit=8) if fact.kind == "event"]
+        events = [
+            fact
+            for fact in memory.facts("经历", limit=8)
+            if fact.kind == "event" and matches_event_time(fact.value, hints)
+        ]
         facts = facts + [fact for fact in events if fact.id not in {row.id for row in facts}]
+        if hints:
+            episodes = [
+                episode for episode in episodes if matches_event_time(episode["summary"], hints)
+            ]
     else:
         episodes = memory.retrieve_episodes(text, 4)
     if learning.fact_ids:

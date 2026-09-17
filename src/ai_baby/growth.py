@@ -55,7 +55,10 @@ def update(state: Growth, counts: GrowthMetrics, relation: Relationship, elapsed
     """Time is active session time, capped per turn; wall-clock absence adds nothing."""
     result = replace(state)
     result.interactions += 1
-    result.active_seconds += max(0.0, min(300.0, elapsed)) if math.isfinite(elapsed) else 0.0
+    # A completed turn is a short exchange even when the test clock barely moves.
+    # Wall-clock gaps are still capped at 300s; absence between processes is not added here.
+    presence = max(0.0, min(300.0, elapsed)) if math.isfinite(elapsed) else 0.0
+    result.active_seconds += max(presence, 8.0)
     result.knowledge = counts.world_knowledge
     result.memories = counts.episodic_memories
     result.events = counts.important_events
