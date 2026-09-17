@@ -47,6 +47,51 @@ def recall_topics(text: str) -> set[str]:
     return {token for token in tokens(text) if len(token) >= 2}
 
 
+_FACT_QUERY_ALIASES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("personal", "居住地"): (
+        "我住在哪里",
+        "我住哪儿",
+        "我住哪",
+        "我家在哪里",
+        "我家在哪儿",
+        "我家在哪",
+        "我在哪住",
+        "我的居住地是什么",
+        "我的居住地在哪里",
+    ),
+    ("personal", "生日"): (
+        "我的生日是哪天",
+        "我生日哪天",
+        "我的生日是什么时候",
+        "我什么时候生日",
+        "我生日几号",
+        "我的生日几号",
+    ),
+    ("personal", "职业"): (
+        "我做什么工作",
+        "我是做什么工作的",
+        "我干什么工作",
+        "我的职业是什么",
+        "我的职业是啥",
+    ),
+    ("relation", "朋友"): (
+        "我的朋友是谁",
+        "我有哪些朋友",
+        "我的朋友有谁",
+        "谁是我的朋友",
+    ),
+}
+
+
+def fact_query_route(text: str) -> tuple[str, str] | None:
+    """Map supported conversational questions to stored predicates before lexical retrieval."""
+    compact = re.sub(r"[\s，,。！？!?；;：:]+", "", text)
+    for route, aliases in _FACT_QUERY_ALIASES.items():
+        if any(alias in compact for alias in aliases):
+            return route
+    return None
+
+
 class Retriever(Protocol):
     def retrieve(self, query: str, limit: int = 8) -> list[Fact]: ...
 
@@ -125,11 +170,16 @@ def build_context(
     retriever: Retriever | None = None,
 ) -> Context:
     """Allow vector retrieval to replace keyword retrieval without replacing generation."""
-    facts = (retriever or memory).retrieve(text, limit=8)
-    # Queries about preferences need category retrieval even without object keywords.
-    if any(w in text for w in ("喜欢什么", "喜好", "讨厌什么")):
-        predicate = "dislikes" if "不喜欢" in text or "讨厌" in text else "likes"
-        facts = memory.facts(predicate, limit=8)
+    route = fact_query_route(text)
+    if route is not None:
+        kind, predicate = route
+        facts = [f for f in memory.facts(predicate, limit=20) if f.kind == kind][:8]
+    else:
+        facts = (retriever or memory).retrieve(text, limit=8)
+        # Queries about preferences need category retrieval even without object keywords.
+        if any(w in text for w in ("喜欢什么", "喜好", "讨厌什么")):
+            predicate = "dislikes" if "不喜欢" in text or "讨厌" in text else "likes"
+            facts = memory.facts(predicate, limit=8)
     if is_recall_query(text):
         topics = recall_topics(text)
         # Search the actual topic, so high-importance boilerplate does not consume the top slots.
