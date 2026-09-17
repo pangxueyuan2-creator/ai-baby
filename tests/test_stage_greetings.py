@@ -10,7 +10,7 @@ from ai_baby.models import Growth
     [
         ("newborn", "今天的新鲜事"),
         ("baby", "今天的新鲜事"),
-        ("child", "最近聊过的事"),
+        ("child", "能找到的旧记录"),
         ("growing", "核对的旧记忆"),
         ("mature", "核对的旧记忆"),
     ],
@@ -22,4 +22,5 @@ def test_offline_greeting_changes_with_growth_stage(baby, stage, expected):
     reply = baby.chat("你好").text
 
     assert expected in reply
+    assert "还记得我们" not in reply
     assert "我记得你" not in reply
