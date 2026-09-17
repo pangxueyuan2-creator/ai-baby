@@ -8,14 +8,14 @@ from .models import Relationship
 
 def _direct_clauses(text: str) -> list[str]:
     """Conservatively exclude quotations, hypotheticals and reported utterances."""
-    text = re.sub(r'“[^”]*”|‘[^’]*’|"[^"]*"|\'[^\']*\'|「[^」]*」', "", text)
+    text = re.sub(r'[“”‘’「」"]+', ' ', text)
     clauses = re.findall(r"[^，,。！？!?；;\n]+[，,。！？!?；;\n]?", text)
     return [
         clause
         for clause in clauses
         if not any(marker in clause for marker in ("?", "？", "吗", "如果", "假如", "假设", "是否"))
         and not re.search(
-            r"(?:他|她|别人|有人)(?:对我)?说|(?:不要|别|没有|没|不曾|不是|不许|并非|从没)(?:再)?说|台词|例句|[“”‘’"'\u300c\u300d]",
+            r"(?:他|她|别人|有人)(?:对我)?说|(?:不要|别|没有|没|不曾|不是|不许|并非|从没)(?:再)?说|台词|例句",
             clause,
         )
     ]
@@ -78,8 +78,6 @@ def update(state: Relationship, tone: str) -> Relationship:
         "hostile": (-0.35, -0.10, 0.10, -0.20, -0.15),
         "ambiguous": (0.0, 0.0, 0.08, 0.0, 0.0),
         "distress": (0.04, 0.05, 0.10, 0.05, 0.0),
-        # Neutral conversation may very slowly increase familiarity, but it must not create
-        # trust/attachment/closeness merely by keeping the process busy.
         "neutral": (0.0, 0.0, 0.02, 0.0, 0.0),
         "reserved": (0.0, 0.01, 0.08, 0.01, 0.0),
     }
