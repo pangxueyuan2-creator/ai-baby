@@ -33,9 +33,7 @@ def test_simple_english_profile_facts_can_be_learned_and_recalled(
         ("Mina is my family member.", "Who are my family members?", "Mina"),
     ],
 )
-def test_simple_english_relations_can_be_learned_and_recalled(
-    baby, statement, question, expected
-):
+def test_simple_english_relations_can_be_learned_and_recalled(baby, statement, question, expected):
     baby.chat(statement)
 
     reply = baby.chat(question).text
