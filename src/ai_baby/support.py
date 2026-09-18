@@ -130,14 +130,14 @@ def _exit_code(status: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            "生成不含聊天、记忆正文、资料值、绝对数据库路径或 Provider 配置的诊断支持包"
-        )
+        description=("生成不含聊天、记忆正文、资料值、绝对数据库路径或 Provider 配置的诊断支持包")
     )
     location = parser.add_mutually_exclusive_group()
     location.add_argument("--data-dir", type=Path, help="宝宝数据目录；检查其中 baby.sqlite3")
     location.add_argument("--database", type=Path, help="直接检查指定 AI Baby SQLite 文件")
-    parser.add_argument("--output", type=Path, required=True, help="新 JSON 文件路径；绝不覆盖已有文件")
+    parser.add_argument(
+        "--output", type=Path, required=True, help="新 JSON 文件路径；绝不覆盖已有文件"
+    )
     parser.add_argument(
         "--full",
         action="store_true",
