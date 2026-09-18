@@ -13,6 +13,7 @@ from .restore import check_restore_backup
 
 EXIT_OK = 0
 EXIT_NOT_READY = 1
+_IO_ERROR_MESSAGE = "无法读取备份目录、备份文件或临时验证目录；请检查路径和权限。"
 
 
 def _default_data_dir() -> Path:
@@ -64,12 +65,21 @@ def audit_recovery_readiness(
     for backup in backups:
         try:
             report = check_restore_backup(backup, require_checksum=require_checksum)
-        except (MemoryError, ValueError, OSError) as exc:
+        except (MemoryError, ValueError) as exc:
             backup_reports.append(
                 {
                     "name": backup.name,
                     "status": "error",
                     "message": str(exc),
+                }
+            )
+            continue
+        except OSError:
+            backup_reports.append(
+                {
+                    "name": backup.name,
+                    "status": "error",
+                    "message": _IO_ERROR_MESSAGE,
                 }
             )
             continue
@@ -160,11 +170,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="输出稳定 JSON，便于脚本和 CI 使用")
     args = parser.parse_args(argv)
 
-    report = audit_recovery_readiness(
-        args.data_dir or _default_data_dir(),
-        backup_dir=args.backup_dir,
-        require_checksum=args.require_checksum,
-    )
+    try:
+        report = audit_recovery_readiness(
+            args.data_dir or _default_data_dir(),
+            backup_dir=args.backup_dir,
+            require_checksum=args.require_checksum,
+        )
+    except OSError:
+        if args.json:
+            print(json.dumps({"status": "error", "message": _IO_ERROR_MESSAGE}, ensure_ascii=False))
+        else:
+            print(_IO_ERROR_MESSAGE)
+        return EXIT_NOT_READY
+
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
