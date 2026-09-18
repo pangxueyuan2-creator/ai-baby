@@ -145,9 +145,7 @@ def audit_recovery_readiness(
             f"至少需要 {min_recoverable_backups} 个可恢复备份，当前只有 {recoverable} 个。"
         )
     if max_backup_age_hours is not None and fresh_recoverable == 0:
-        policy_violations.append(
-            f"没有在最近 {max_backup_age_hours:g} 小时内创建且可恢复的备份。"
-        )
+        policy_violations.append(f"没有在最近 {max_backup_age_hours:g} 小时内创建且可恢复的备份。")
 
     if current["status"] == "error" or invalid or orphans:
         status = "error"
