@@ -123,7 +123,8 @@ def _english_simple_fact(sentence: str) -> MemoryCandidate | None:
     relation = re.fullmatch(
         r"(.+?)\s+is\s+my\s+(friend|classmate|teacher|coworker|colleague|family\s+member)",
         sentence,
-        re.IGNORECASE,
+        # ASCII grammar keywords keep the predicate mapping total; names remain Unicode.
+        re.IGNORECASE | re.ASCII,
     )
 
     if residence:
@@ -133,6 +134,9 @@ def _english_simple_fact(sentence: str) -> MemoryCandidate | None:
     if profession:
         return MemoryCandidate("personal", "用户", "职业", profession[1]).validated()
     if relation:
+        # A missing question mark does not turn an interrogative subject into a person.
+        if re.match(r"(?:who|what|which)\b", relation[1], re.IGNORECASE):
+            return None
         predicate = {
             "friend": "朋友",
             "classmate": "同学",
