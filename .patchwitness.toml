@@ -1,0 +1,47 @@
+version = 1
+id = "ai-baby-safe-delivery"
+goal = "Keep AI Baby changes reviewable, tested, privacy-preserving, and non-destructive"
+
+[policy]
+allowed_paths = ["**"]
+denied_paths = [
+  ".git/**",
+  ".patchwitness/evidence/**",
+  ".venv/**",
+  "build/**",
+  "dist/**",
+  "data/**",
+]
+protected_paths = [
+  ".github/workflows/**",
+  ".patchwitness.toml",
+]
+max_files = 80
+max_lines = 10000
+allow_binary = false
+allow_dependency_changes = false
+require_tests = true
+
+[[checks]]
+id = "tests"
+command = "python -m pytest -q"
+required = true
+timeout_seconds = 300
+
+[[checks]]
+id = "lint"
+command = "python -m ruff check ."
+required = true
+timeout_seconds = 120
+
+[[checks]]
+id = "format"
+command = "python -m ruff format --check ."
+required = true
+timeout_seconds = 120
+
+[[checks]]
+id = "build"
+command = "python -m build"
+required = true
+timeout_seconds = 180
