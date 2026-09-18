@@ -57,9 +57,7 @@ def test_recovery_audit_enforces_minimum_recoverable_copy_count(store, tmp_path)
     assert report["status"] == "policy_failed"
     assert report["backup_summary"]["recoverable"] == 1
     assert report["recovery_policy"]["min_recoverable_backups"] == 2
-    assert report["recovery_policy"]["violations"] == [
-        "至少需要 2 个可恢复备份，当前只有 1 个。"
-    ]
+    assert report["recovery_policy"]["violations"] == ["至少需要 2 个可恢复备份，当前只有 1 个。"]
 
 
 def test_recovery_audit_enforces_recent_recovery_point(store, tmp_path):
@@ -77,9 +75,7 @@ def test_recovery_audit_enforces_recent_recovery_point(store, tmp_path):
     assert report["recovery_policy"]["fresh_recoverable"] == 0
     assert report["backups"][0]["fresh"] is False
     assert report["backups"][0]["age_hours"] >= 71
-    assert report["recovery_policy"]["violations"] == [
-        "没有在最近 24 小时内创建且可恢复的备份。"
-    ]
+    assert report["recovery_policy"]["violations"] == ["没有在最近 24 小时内创建且可恢复的备份。"]
 
 
 def test_recovery_audit_accepts_recent_recovery_point(store, tmp_path):
