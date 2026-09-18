@@ -62,13 +62,26 @@ For a strict disaster-recovery policy, require every backup to have a matching c
 ai-baby-recovery-audit --data-dir ~/.ai-baby --require-checksum
 ```
 
+A valid backup set can still be operationally weak if it has only one copy or the newest recovery point is old. Add explicit recovery-readiness objectives when that matters:
+
+```bash
+ai-baby-recovery-audit --data-dir ~/.ai-baby \
+  --require-checksum \
+  --min-recoverable-backups 2 \
+  --max-backup-age-hours 24
+```
+
+`--min-recoverable-backups` requires at least that many backups to pass the full restore preflight. `--max-backup-age-hours` requires at least one recoverable backup whose filesystem modification time is no older than the configured window. A future-dated file is treated as age zero rather than producing a negative age. These gates are intentionally opt-in except for the existing default requirement of one recoverable backup.
+
 Stable machine-readable output is available for CI and scheduled recovery drills:
 
 ```bash
 ai-baby-recovery-audit --data-dir ~/.ai-baby --require-checksum --json
 ```
 
-The audit reports the current database status, checked/recoverable/invalid backup counts, per-backup schema migration requirements, and orphan `.sha256` manifests. It deliberately omits the absolute live database path and does not load provider configuration, API keys, or a chat session. A nonzero exit means recovery is not fully ready: no backups were found, the current database is unhealthy, at least one backup is not restorable, or an orphan checksum manifest exists.
+The audit reports the current database status, checked/recoverable/invalid backup counts, per-backup schema migration requirements, and orphan `.sha256` manifests. When recovery objectives are configured, JSON also includes the requested minimum copy count, maximum backup age, fresh recoverable count, policy violations, and per-backup age/freshness for successfully validated backups. It deliberately omits the absolute live database path and does not load provider configuration, API keys, or a chat session.
+
+A nonzero exit means recovery is not fully ready: no backups were found, the current database is unhealthy, at least one backup is not restorable, an orphan checksum manifest exists, or a configured copy-count/freshness objective is not met. Integrity failures remain failures even if enough other backups satisfy the minimum count; the policy gates do not hide damaged recovery artifacts.
 
 Restore is intentionally a separate, non-interactive command so recovery never needs a model provider, API key, or chat session:
 
@@ -120,14 +133,14 @@ Restore and restore preflight are deliberately non-destructive:
 - If the target data directory already contains `baby.sqlite3`, restore refuses to overwrite it; the exclusive create also closes the race if another process creates it during recovery.
 - Invalid, corrupt, unsupported, checksum-mismatched, or partially written inputs leave the target without a restored database.
 
-Recovery-readiness audit inherits those preflight guarantees for every discovered backup. It writes only disposable temporary staging data managed by the operating system, never creates a recovery target, never alters a backup or checksum sidecar, and treats orphan manifests as a failed recovery set rather than silently ignoring them.
+Recovery-readiness audit inherits those preflight guarantees for every discovered backup. It writes only disposable temporary staging data managed by the operating system, never creates a recovery target, never alters a backup or checksum sidecar, and treats orphan manifests as a failed recovery set rather than silently ignoring them. Copy-count and freshness objectives only inspect validated results and file metadata; they do not delete, rotate, or rewrite backup files.
 
 The JSON produced by `/export` is a readable data export and is **not** a database restore format.
 
 ## Recommended recovery flow
 
 1. Keep the original damaged data directory unchanged.
-2. Run `ai-baby-recovery-audit --data-dir DATA_DIR --require-checksum` regularly so broken or incomplete backup sets are found before an incident.
+2. Run `ai-baby-recovery-audit --data-dir DATA_DIR --require-checksum --min-recoverable-backups 2 --max-backup-age-hours 24` regularly (adjust the copy count and age window to your own recovery objective) so broken, insufficient, or stale backup sets are found before an incident.
 3. Prefer the newest known-good verified `.sqlite3` backup and keep its `.sha256` file beside it.
 4. Run `ai-baby-restore BACKUP.sqlite3 --check --require-checksum` so the exact restore path, including staged migration, is validated before a target is created.
 5. Restore into a **new** data directory with `ai-baby-restore BACKUP.sqlite3 --data-dir NEW_DIR --require-checksum`.
