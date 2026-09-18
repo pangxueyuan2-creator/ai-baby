@@ -48,6 +48,28 @@ ai-baby-restore /safe/location/baby.sqlite3 --check --require-checksum --json
 
 The report includes the source schema version, target schema version, whether migration is required, and the verified checksum when a sidecar is present. `--check` does not accept `--data-dir`, does not create a recovery target, does not alter the backup, and never loads a model provider or API key. Supported older schemas are migrated only inside disposable staging so the original backup remains at its original schema version.
 
+## Recovery-readiness audit
+
+Use `ai-baby-recovery-audit` to check the live database and **every** `.sqlite3` backup in one pass. Each discovered backup goes through the same disposable staged migration, current-schema validation, and foreign-key checks as `ai-baby-restore --check`; the audit never migrates or edits the source backups.
+
+```bash
+ai-baby-recovery-audit --data-dir ~/.ai-baby
+```
+
+For a strict disaster-recovery policy, require every backup to have a matching checksum sidecar:
+
+```bash
+ai-baby-recovery-audit --data-dir ~/.ai-baby --require-checksum
+```
+
+Stable machine-readable output is available for CI and scheduled recovery drills:
+
+```bash
+ai-baby-recovery-audit --data-dir ~/.ai-baby --require-checksum --json
+```
+
+The audit reports the current database status, checked/recoverable/invalid backup counts, per-backup schema migration requirements, and orphan `.sha256` manifests. It deliberately omits the absolute live database path and does not load provider configuration, API keys, or a chat session. A nonzero exit means recovery is not fully ready: no backups were found, the current database is unhealthy, at least one backup is not restorable, or an orphan checksum manifest exists.
+
 Restore is intentionally a separate, non-interactive command so recovery never needs a model provider, API key, or chat session:
 
 ```bash
@@ -62,6 +84,7 @@ The equivalent module forms work from a source checkout:
 
 ```bash
 python -m ai_baby.backup --data-dir ~/.ai-baby
+python -m ai_baby.recovery_audit --data-dir ~/.ai-baby --require-checksum
 python -m ai_baby.restore BACKUP.sqlite3 --check --require-checksum
 python -m ai_baby.restore BACKUP.sqlite3 --data-dir ~/.ai-baby-restored --require-checksum
 ```
@@ -97,15 +120,18 @@ Restore and restore preflight are deliberately non-destructive:
 - If the target data directory already contains `baby.sqlite3`, restore refuses to overwrite it; the exclusive create also closes the race if another process creates it during recovery.
 - Invalid, corrupt, unsupported, checksum-mismatched, or partially written inputs leave the target without a restored database.
 
+Recovery-readiness audit inherits those preflight guarantees for every discovered backup. It writes only disposable temporary staging data managed by the operating system, never creates a recovery target, never alters a backup or checksum sidecar, and treats orphan manifests as a failed recovery set rather than silently ignoring them.
+
 The JSON produced by `/export` is a readable data export and is **not** a database restore format.
 
 ## Recommended recovery flow
 
 1. Keep the original damaged data directory unchanged.
-2. Prefer the newest known-good verified `.sqlite3` backup and keep its `.sha256` file beside it.
-3. Run `ai-baby-restore BACKUP.sqlite3 --check --require-checksum` so the exact restore path, including staged migration, is validated before a target is created.
-4. Restore into a **new** data directory with `ai-baby-restore BACKUP.sqlite3 --data-dir NEW_DIR --require-checksum`.
-5. Start AI Baby with `--data-dir` pointing to that restored directory and verify the profile and memories.
-6. Only after verification should you decide whether to keep using the recovered directory.
+2. Run `ai-baby-recovery-audit --data-dir DATA_DIR --require-checksum` regularly so broken or incomplete backup sets are found before an incident.
+3. Prefer the newest known-good verified `.sqlite3` backup and keep its `.sha256` file beside it.
+4. Run `ai-baby-restore BACKUP.sqlite3 --check --require-checksum` so the exact restore path, including staged migration, is validated before a target is created.
+5. Restore into a **new** data directory with `ai-baby-restore BACKUP.sqlite3 --data-dir NEW_DIR --require-checksum`.
+6. Start AI Baby with `--data-dir` pointing to that restored directory and verify the profile and memories.
+7. Only after verification should you decide whether to keep using the recovered directory.
 
-For legacy `/backup` snapshots without sidecars, omit `--require-checksum` in steps 3 and 4. The backup and restore commands never delete or replace the original live database for you.
+For legacy `/backup` snapshots without sidecars, omit `--require-checksum` in steps 2, 4, and 5. The backup, audit, and restore commands never delete or replace the original live database for you.
