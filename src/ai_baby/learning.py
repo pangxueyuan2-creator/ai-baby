@@ -3,7 +3,12 @@
 import re
 from dataclasses import dataclass, field
 
-from .candidates import MemoryCandidate, assertion_clauses, extract_candidates
+from .candidates import (
+    _NON_ASSERTIONS,
+    MemoryCandidate,
+    assertion_clauses,
+    extract_candidates,
+)
 from .memory import MemoryStore
 from .models import parse_memory_id
 
@@ -58,10 +63,9 @@ def is_coarser_place(new: str, old: str) -> bool:
         return False
     if previous.startswith(incoming) and len(incoming) < len(previous):
         return True
-    new_tokens = _place_tokens(new)
     old_tokens = _place_tokens(old)
-    ancestors = set(_PLACE_CHILDREN)
-    return bool(old_tokens - ancestors) and new_tokens <= ancestors
+    # A known parent is broader only than its own children, not every other place.
+    return any(child in old_tokens for child in _PLACE_CHILDREN.get(incoming, ()))
 
 
 class Learner:
@@ -89,7 +93,26 @@ class Learner:
                 self._save(candidate, result)
                 self.memory.db.execute("DELETE FROM candidates WHERE id=?", (candidate_id,))
             return result
-        for sentence in assertion_clauses(text):
+        clauses = assertion_clauses(text)
+        # Use only complete assertions that survived the existing scope guards.
+        # Retractions affect a new residence in this turn, never delete facts alone.
+        # Quotation/hypothetical scope can span punctuation split by assertion_clauses.
+        retraction_clauses = (
+            []
+            if any(cue in text for cue in (*_NON_ASSERTIONS, "'", "可能", "也许", "好像"))
+            else clauses
+        )
+        retracted_places = frozenset(
+            self.memory.normalize(match[1])
+            for clause in retraction_clauses
+            if (
+                match := re.fullmatch(
+                    r"我(?:(?:现在|已经)?不(?:再)?住(?:在)?|(?:以前|曾经)住(?:在)?)(.+?)(?:了)?",
+                    clause,
+                )
+            )
+        )
+        for sentence in clauses:
             extracted = extract_candidates(sentence)
             if extracted:
                 for extended in extracted:
@@ -104,7 +127,7 @@ class Learner:
                         )
                         result.pending.append({"id": candidate_id, "value": extended.value})
                     else:
-                        self._save(extended, result)
+                        self._save(extended, result, retracted_places)
                 continue
             pref = re.fullmatch(r"我(不喜欢|讨厌|喜欢)(.+)", sentence)
             personal = re.fullmatch(r"我(住在|的生日是|的职业是)(.+)", sentence)
@@ -142,7 +165,7 @@ class Learner:
                 if any(not v or len(v) > 500 for v in candidate):
                     result.acknowledgements.append("这条知识需要更简短一些（每项最多 500 字）。")
                     continue
-                self._save(MemoryCandidate(*candidate).validated(), result)
+                self._save(MemoryCandidate(*candidate).validated(), result, retracted_places)
         if result.pending:
             current_ids = {row[0] for row in self.memory.db.execute("SELECT id FROM candidates")}
             result.pending = [
@@ -160,7 +183,12 @@ class Learner:
         )
         return candidate_id
 
-    def _save(self, candidate: MemoryCandidate, result: LearningResult) -> None:
+    def _save(
+        self,
+        candidate: MemoryCandidate,
+        result: LearningResult,
+        retracted_places: frozenset[str] = frozenset(),
+    ) -> None:
         candidate = candidate.validated()
         fields = (candidate.kind, candidate.subject, candidate.predicate, candidate.value)
         if candidate.kind == "preference":
@@ -180,7 +208,11 @@ class Learner:
                 candidate.value
             ):
                 previous = row["value"]
-                if candidate.predicate == "居住地" and is_coarser_place(candidate.value, previous):
+                if (
+                    candidate.predicate == "居住地"
+                    and self.memory.normalize(previous) not in retracted_places
+                    and is_coarser_place(candidate.value, previous)
+                ):
                     result.acknowledgements.append(
                         f"还是记着更具体的{previous}（{candidate.value}范围更大）"
                     )
