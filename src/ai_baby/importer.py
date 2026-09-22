@@ -4,8 +4,10 @@ import argparse
 import json
 import math
 import os
+import re
 import sqlite3
 from dataclasses import fields
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,10 @@ from .storage_files import reserve_private_file
 EXIT_OK = 0
 EXIT_INVALID = 1
 MAX_EXPORT_BYTES = 20 * 1024 * 1024
+_TIMESTAMP = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?"
+)
 
 _STATE_TYPES = {
     "growth": Growth,
@@ -59,6 +65,20 @@ def _export_id(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 < value < 2**63:
         raise ValueError(f"隐私导出中的 {label} ID 无效。")
     return value
+
+
+def _created_at(item: dict[str, Any], label: str, fallback: str) -> str:
+    """Validate portable timestamps and normalize their instant to SQLite UTC text."""
+    value = item.get("created_at", fallback)
+    if not isinstance(value, str) or _TIMESTAMP.fullmatch(value) is None:
+        raise ValueError(f"隐私导出中的 {label}.created_at 时间无效。")
+    try:
+        stamp = datetime.fromisoformat(value)
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(timezone.utc).replace(tzinfo=None).isoformat(sep=" ")
+    except (ValueError, OverflowError):
+        raise ValueError(f"隐私导出中的 {label}.created_at 时间无效。") from None
 
 
 def _validate_state(key: str, value: Any) -> Any:
@@ -144,8 +164,11 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
     if "history" in payload:
         raise ValueError("默认隐私导出不应包含聊天历史；已拒绝导入。")
 
+    # Older documents may omit timestamps; use one explicit import-time fallback.
+    imported_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(sep=" ")
     profile_payload = payload.get("profile")
     profile = None
+    profile_created_at = None
     if profile_payload is not None:
         profile_data = _as_object(profile_payload, "profile")
         try:
@@ -154,6 +177,7 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("隐私导出中的 profile 无效。") from exc
+        profile_created_at = _created_at(profile_data, "profile", imported_at)
 
     baby = _as_object(payload.get("baby"), "baby")
     try:
@@ -180,6 +204,7 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
                 "subject": clean_text(item["subject"], 500),
                 "predicate": clean_text(item["predicate"], 500),
                 "value": clean_text(item["value"], 500),
+                "created_at": _created_at(item, "fact", imported_at),
             }
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("隐私导出包含无效 fact。") from exc
@@ -213,6 +238,7 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
                 "summary": clean_text(item["summary"], 500),
                 "importance": float(importance),
                 "fact_id": fact_id,
+                "created_at": _created_at(item, "episode", imported_at),
             }
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("隐私导出包含无效 episode。") from exc
@@ -220,6 +246,7 @@ def load_privacy_export(source: Path, *, require_checksum: bool = False) -> dict
 
     portable = {
         "profile": profile,
+        "profile_created_at": profile_created_at,
         "baby_name": baby_name,
         "states": states,
         "facts": facts,
@@ -275,6 +302,9 @@ def import_privacy_export(
         with memory.transaction():
             if portable["profile"] is not None:
                 memory.save_profile(portable["profile"])
+                memory.db.execute(
+                    "UPDATE profile SET created_at=? WHERE id=1", (portable["profile_created_at"],)
+                )
             memory.set_setting("baby_name", portable["baby_name"])
             for key, state in portable["states"].items():
                 memory.save_state(key, state)
@@ -294,6 +324,9 @@ def import_privacy_export(
                 if row is None:
                     raise ValueError("无法重建导出的 fact；目标数据库未保留。")
                 fact_ids[fact["id"]] = row["id"]
+                memory.db.execute(
+                    "UPDATE facts SET created_at=? WHERE id=?", (fact["created_at"], row["id"])
+                )
 
             for episode in portable["episodes"]:
                 old_fact_id = episode["fact_id"]
@@ -307,6 +340,12 @@ def import_privacy_export(
                     episode["summary"],
                     episode["importance"],
                     new_fact_id,
+                )
+                # This new database is held in one write transaction; the largest ID
+                # is the episode just inserted, even when token inserts changed lastrowid.
+                memory.db.execute(
+                    "UPDATE episodes SET created_at=? WHERE id=(SELECT max(id) FROM episodes)",
+                    (episode["created_at"],),
                 )
         memory.close()
         memory = None

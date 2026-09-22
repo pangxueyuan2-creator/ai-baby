@@ -21,6 +21,20 @@ The importer restores the user-visible active profile, baby name, structured sta
 rebuilds SQLite indexes and internal IDs using the current schema rather than copying hidden implementation
 bookkeeping from the export.
 
+Birth time (`profile.created_at`) and the creation times of active facts and episodes are
+preserved. Restarting an imported character therefore retains its age in growth journals
+and the recency of its memories. Timestamps accept `YYYY-MM-DD HH:MM:SS` (the SQLite UTC
+format) or the same date and time with a `T` separator, optional one-to-six-digit fractional
+seconds, and optional `Z` / `+HH:MM` / `-HH:MM` timezone. Explicit offsets are normalized to
+UTC before storage; timestamps without an offset are treated as UTC. Invalid dates,
+date-only values, nulls, and unsupported formats are rejected during preflight, before
+creating a destination.
+
+For compatibility, an older document that omits a `created_at` field still imports. Missing
+fields use one shared current UTC time for that import; the original dates cannot be inferred.
+This fallback applies only to absent fields, not invalid supplied values. Timestamp handling
+does not restore inactive memories or raw history, and it does not change the database schema.
+
 ## Preflight / dry validation
 
 Use `--check` before a migration, in CI, or whenever an export arrives from another machine:

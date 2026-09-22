@@ -129,6 +129,10 @@ python scripts/acceptance_demo.py
 
 本地 Windows / Python 3.14 实测（2026-09-17）：A–H 全部通过；B 的第二写入耗时 6.54 ms，模拟 provider 等待 2 秒；C 单轮人格最大变化 0.08，200 轮后鼓励组 confidence 63.70、openness 63.70，谨慎组 confidence 50.00、caution 60.67；D 的旧事件排名第一，单次检索 6.91 ms。此快照是一次测量，不是固定性能指标。
 
+## 隐私迁移的时间保留回归
+
+`python -m pytest tests/test_import_history.py -q` 使用合成数据验证：出生时间、有效事实和经历时间在导出、导入与重启后保留；日记继续原年龄，同等相关度经历的近期排序保持一致。另覆盖 UTC 时区规范化、旧文件缺省日期、无效日期在创建目标前拒绝、写入失败清理及不恢复已遗忘内容。基线 `426ade3` 上 15 项失败、1 项通过，修复后 16 项通过；该分支完整测试为 614 passed / 5 skipped，Ruff 和 wheel / sdist 构建通过。没有改变 schema v3。
+
 ## 已知验证范围
 
 英文偏好保存边界：`python -m pytest tests/test_english_preference_safety.py -q`。
