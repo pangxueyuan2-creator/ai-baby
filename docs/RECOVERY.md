@@ -32,9 +32,11 @@ ai-baby-backup --verify /safe/location/baby.sqlite3 --require-checksum
 
 `--require-checksum` is useful in automation when a missing sidecar should be treated as an error. Without it, verification remains compatible with older `/backup` snapshots that predate checksum manifests.
 
+For the current schema, verified backup creation and verification also check that the five known character states can be decoded by normal chat. A matching checksum does not make malformed state JSON or invalid state values usable. Supported older schemas still report `upgrade_required` without being modified by backup verification; use restore preflight to validate their state after staged migration.
+
 ## Restore preflight
 
-Before allocating a recovery directory, `ai-baby-restore --check` can prove that a backup is restorable by copying it into disposable temporary storage, applying any supported schema migration there, validating the current schema and concurrency metadata, and running foreign-key checks:
+Before allocating a recovery directory, `ai-baby-restore --check` checks whether a backup passes the recovery requirements by copying it into disposable temporary storage, applying any supported schema migration there, validating the current schema and concurrency metadata, and checking foreign keys and known character states:
 
 ```bash
 ai-baby-restore /safe/location/baby.sqlite3 --check --require-checksum
@@ -48,9 +50,11 @@ ai-baby-restore /safe/location/baby.sqlite3 --check --require-checksum --json
 
 The report includes the source schema version, target schema version, whether migration is required, and the verified checksum when a sidecar is present. `--check` does not accept `--data-dir`, does not create a recovery target, does not alter the backup, and never loads a model provider or API key. Supported older schemas are migrated only inside disposable staging so the original backup remains at its original schema version.
 
+State validation covers `growth`, `growth_metrics`, `relationship`, `emotion`, and `personality` with the same fields, types, finite numeric values, stages, and ranges accepted by normal chat. Missing known state rows retain their default behavior, and unknown extension keys are preserved without interpretation. Existing invalid state records are rejected rather than reset; the error never includes their stored values. This check does not claim to validate every possible application-level relationship in a database.
+
 ## Recovery-readiness audit
 
-Use `ai-baby-recovery-audit` to check the live database and **every** `.sqlite3` backup in one pass. Each discovered backup goes through the same disposable staged migration, current-schema validation, and foreign-key checks as `ai-baby-restore --check`; the audit never migrates or edits the source backups.
+Use `ai-baby-recovery-audit` to check the live database and **every** `.sqlite3` backup in one pass. Each discovered backup goes through the same disposable staged migration, current-schema validation, foreign-key checks, and character-state validation as `ai-baby-restore --check`; the audit never migrates or edits the source backups.
 
 ```bash
 ai-baby-recovery-audit --data-dir ~/.ai-baby
@@ -128,6 +132,7 @@ Restore and restore preflight are deliberately non-destructive:
 - The backup is copied into disposable staging first.
 - Staged data is opened through `MemoryStore`, so supported older schemas are migrated and the current schema/concurrency metadata are validated before installation.
 - Foreign-key integrity is checked after staged migration.
+- Known character states are decoded after staged migration; malformed states fail even when SQLite integrity and SHA-256 checks pass. Validation cursors and the staged store are closed on failure so temporary files can be removed on Windows as well as POSIX.
 - Invalid input is fully rejected before the requested target data directory is created.
 - The final `baby.sqlite3` is created with the same exclusive private-file path used by normal backups.
 - If the target data directory already contains `baby.sqlite3`, restore refuses to overwrite it; the exclusive create also closes the race if another process creates it during recovery.

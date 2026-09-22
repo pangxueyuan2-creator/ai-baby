@@ -27,9 +27,14 @@ For the current schema, doctor verifies:
 - required AI Baby tables and columns;
 - revision/concurrency-protection metadata;
 - foreign-key references;
+- stored `growth`, `growth_metrics`, `relationship`, `emotion`, and `personality` JSON, using the same field, type, finite-number, stage, and range checks as normal chat state loading;
 - non-sensitive record counts for profile, active facts, active episodes, and recent messages.
 
 The command never prints profile values, memory text, message contents, API keys, or provider configuration.
+
+An existing known state with malformed JSON, missing/extra fields, an invalid stage/emotion, or invalid numeric values reports `status="error"`, `code="state_invalid"`, and exit code `1`, even when SQLite integrity checks pass. The message does not include the stored value. Missing known state rows remain valid because chat uses their existing defaults; doctor does not create those rows. Unknown state keys are left untouched and are not interpreted as character states. These checks preserve the chat decoder's existing accepted values rather than introducing stricter growth rules or repairing data.
+
+Known-state validation does not claim semantic validation of every profile, fact, or relationship between stored records. For supported older schemas, doctor still reports `upgrade_required`; restore preflight validates character states after migrating only a disposable copy.
 
 ## Read-only behavior
 
@@ -38,7 +43,7 @@ Doctor opens the selected database with SQLite `mode=ro`, enables `query_only`, 
 - a current healthy database is inspected in place and left unchanged;
 - a supported older schema reports `upgrade_required` but is **not** migrated;
 - a future/unsupported schema is rejected;
-- a corrupt, empty, unversioned, missing, or structurally incomplete database is reported as unhealthy;
+- a corrupt, empty, unversioned, missing, structurally incomplete database, or one with invalid known character states, is reported as unhealthy;
 - a missing default/data directory is not created just by running doctor;
 - unrelated model/provider environment settings are not loaded, so diagnostics do not require a model, API key, or network access.
 
@@ -49,7 +54,7 @@ If repair or migration is needed, preserve the original file first. For backup r
 | Code | Meaning |
 | --- | --- |
 | `0` | Current database is healthy. |
-| `1` | Database is missing, corrupt, unsupported, or structurally unhealthy. |
+| `1` | Database is missing, corrupt, unsupported, structurally unhealthy, or has invalid known character states. |
 | `3` | Database is a supported older schema and requires an upgrade; doctor did not migrate it. |
 
 Exit code `2` remains available to `argparse` for invalid command-line usage.

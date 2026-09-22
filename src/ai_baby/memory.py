@@ -5,7 +5,6 @@ import math
 import re
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import fields
 from pathlib import Path
 from typing import Any, Iterator, TypeVar
 
@@ -13,6 +12,7 @@ from .migrations import SCHEMA_VERSION as SCHEMA_VERSION
 from .migrations import initialize, validate_schema
 from .migrations.v2 import novelty_key
 from .models import Fact, Profile, clean_text, record
+from .state_validation import StateValidationError, decode_state
 from .storage_files import reserve_private_file
 
 T = TypeVar("T")
@@ -159,41 +159,9 @@ class MemoryStore:
         if row is None:
             return cls()
         try:
-            data = json.loads(row[0])
-            if not isinstance(data, dict) or set(data) != {f.name for f in fields(cls)}:
-                raise ValueError("invalid state fields")
-            defaults = record(cls())
-            for name, value in data.items():
-                expected = defaults[name]
-                if isinstance(expected, (int, float)):
-                    if (
-                        isinstance(value, bool)
-                        or not isinstance(value, (int, float))
-                        or not math.isfinite(value)
-                        or value < 0
-                    ):
-                        raise ValueError("invalid numeric state")
-                elif not isinstance(value, str):
-                    raise ValueError("invalid string state")
-            if key in {"relationship", "personality"} and any(v > 100 for v in data.values()):
-                raise ValueError("invalid relationship")
-            if key == "emotion" and (
-                data["label"]
-                not in {"calm", "happy", "curious", "sad", "playful", "nervous", "annoyed"}
-                or data["intensity"] > 1
-            ):
-                raise ValueError("invalid emotion")
-            if key == "growth" and data["stage"] not in {
-                "newborn",
-                "baby",
-                "child",
-                "growing",
-                "mature",
-            }:
-                raise ValueError("invalid stage")
-            return cls(**data)
-        except (ValueError, TypeError, KeyError, OverflowError) as exc:
-            raise MemoryError("保存的角色状态格式损坏；请从备份恢复。原数据未重置。") from exc
+            return decode_state(key, row[0], cls)
+        except StateValidationError as exc:
+            raise MemoryError(str(exc)) from None
 
     def save_state(self, key: str, value: Any) -> None:
         self.db.execute(
