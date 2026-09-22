@@ -68,6 +68,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             answer = data["choices"][0]["message"]["content"]
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("empty response")
+            # JSON can contain escaped lone surrogates that SQLite cannot store as UTF-8.
+            # Reject them here so malformed provider text takes the normal fallback path.
+            answer.encode("utf-8")
             answer = safe_output(answer).strip()
             if not answer:
                 raise ValueError("invalid response")
