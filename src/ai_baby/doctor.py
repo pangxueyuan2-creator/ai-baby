@@ -10,6 +10,7 @@ from typing import Any
 
 from .migrations import MIGRATIONS, SCHEMA_VERSION, validate_schema
 from .models import safe_output
+from .state_validation import StateValidationError, validate_stored_states
 
 EXIT_OK = 0
 EXIT_UNHEALTHY = 1
@@ -113,6 +114,15 @@ def diagnose_database(path: Path, *, full: bool = False) -> dict[str, Any]:
                 )
                 return result
 
+            try:
+                validate_stored_states(db)
+            except StateValidationError:
+                result.update(
+                    code="state_invalid",
+                    message="保存的角色状态格式或数值无效；原数据未修改。",
+                )
+                return result
+
             counts = {
                 "profile": db.execute("SELECT count(*) FROM profile").fetchone()[0],
                 "active_facts": db.execute("SELECT count(*) FROM facts WHERE active=1").fetchone()[
@@ -127,7 +137,7 @@ def diagnose_database(path: Path, *, full: bool = False) -> dict[str, Any]:
                 status="ok",
                 code="ok",
                 counts=counts,
-                message="数据库完整性、当前 schema 和外键引用检查均通过。",
+                message="数据库完整性、当前 schema、外键引用和角色状态检查均通过。",
             )
             return result
     except sqlite3.Error:

@@ -12,6 +12,7 @@ from .backup import checksum_manifest_path, verify_checksum_manifest
 from .memory import MemoryError, MemoryStore
 from .migrations import MIGRATIONS, SCHEMA_VERSION
 from .models import safe_output
+from .state_validation import StateValidationError, validate_stored_states
 
 EXIT_OK = 0
 EXIT_INVALID = 1
@@ -52,6 +53,10 @@ def _stage_backup(
     try:
         if restored.db.execute("PRAGMA foreign_key_check").fetchone() is not None:
             raise MemoryError("备份数据库引用完整性检查未通过；目标未修改。")
+        try:
+            validate_stored_states(restored.db)
+        except StateValidationError:
+            raise MemoryError("备份角色状态格式损坏；目标未修改。") from None
         target_version = restored.db.execute("PRAGMA user_version").fetchone()[0]
     except BaseException:
         restored.close()
