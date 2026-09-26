@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import journal, management
-from .baby import Baby, TurnConflict
+from .baby import Baby, Reply, TurnConflict
 from .config import Config
 from .memory import MemoryError, MemoryStore
 from .models import (
@@ -109,7 +109,15 @@ def onboarding(baby: Baby) -> None:
     )
 
 
-def command(baby: Baby, text: str) -> bool:
+def _print_reply(baby: Baby, reply: Reply, notices: ProviderNotices | None = None) -> None:
+    """Display every generated reply with its fallback or recovery notice."""
+    notice = notices.observe(reply.warning) if notices is not None else reply.warning
+    if notice:
+        print(safe_output(notice))
+    print(baby.name + "：" + reply.text)
+
+
+def command(baby: Baby, text: str, *, notices: ProviderNotices | None = None) -> bool:
     """Run a local command. Return false only for explicit exit."""
     raw_name, _, argument = text.partition(" ")
     name = COMMAND_ALIASES.get(raw_name, raw_name)
@@ -183,7 +191,7 @@ def command(baby: Baby, text: str) -> bool:
             else "没有找到这个事实 ID；可用 /memories --all 查看旧版本。"
         )
     elif name == "/confirm":
-        print(baby.name + "：" + baby.chat(f"确认记忆 {int(argument)}").text)
+        _print_reply(baby, baby.chat(f"确认记忆 {int(argument)}"), notices)
     elif name == "/candidates":
         rows = memory.db.execute(
             "SELECT id,kind,subject,predicate,value FROM candidates ORDER BY id DESC LIMIT 3"
@@ -281,14 +289,10 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 text = clean_text(text)
                 if text.startswith("/"):
-                    if not command(baby, text):
+                    if not command(baby, text, notices=notices):
                         break
                     continue
-                reply = baby.chat(text)
-                notice = notices.observe(reply.warning)
-                if notice:
-                    print(safe_output(notice))
-                print(baby.name + "：" + reply.text)
+                _print_reply(baby, baby.chat(text), notices)
             except (ValueError, TurnConflict) as exc:
                 print(safe_output(str(exc)))
             except sqlite3.OperationalError:
